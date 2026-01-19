@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = [
+    "liftoff-lib",
+    "liftoff-input",
+    "liftoff-router",
+    "liftoff-gpsd", "liftoff-forward",
+]

@@ -1,0 +1,57 @@
+use std::f64::consts::PI;
+
+pub fn gps_from_coord(coord: &[f64; 3], base: (f64, f64)) -> (f64, f64, f64) {
+    let x = coord[0]; // Longitude related
+    let y = coord[2]; // Latitude related
+
+    let base_lon = base.0;
+    let base_lat = base.1;
+
+    let latitude = base_lat + y / 111111.0;
+    let longitude = base_lon + x / (111111.0 * (latitude.to_radians().cos()));
+    let altitude = coord[1];
+
+    (longitude, latitude, altitude)
+}
+
+pub fn quat2heading(q0: f64, q1: f64, q2: f64, q3: f64) -> f64 {
+    let y = 2.0 * ((q2 * q0) + (q3 * q1));
+    let x = q3.powi(2) + q2.powi(2) - q0.powi(2) - q1.powi(2);
+    y.atan2(x)
+}
+
+pub fn quat2eulers(qx: f64, qy: f64, qz: f64, qw: f64) -> (f64, f64, f64) {
+    // swap (liftoff y-up to imu coordinate system z-up)
+    // (qx, qy, qz, qw) = (qx, qz, qy, -qw)
+    let (qx, qy, qz, qw) = (qx, qz, qy, -qw);
+
+    let m00 = 1.0 - 2.0 * qy * qy - 2.0 * qz * qz;
+    let m10 = 2.0 * (qx * qy + qw * qz);
+    let m20 = 2.0 * (qx * qz - qw * qy);
+    let m21 = 2.0 * (qy * qz + qw * qx);
+    let m22 = 1.0 - 2.0 * qx * qx - 2.0 * qy * qy;
+
+    let roll = m21.atan2(m22);
+    let pitch = (0.5 * PI) - (-m20).acos();
+    let yaw = -m10.atan2(m00);
+
+    (roll, pitch, yaw)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_quat2heading() {
+        // N 0,0,0,1 -> 0
+        assert_eq!(quat2heading(0.0, 0.0, 0.0, 1.0).to_degrees().round(), 0.0);
+        // W 0,-0.707,0,0.707 -> -90
+        assert_eq!(
+            quat2heading(0.0, -0.70710678, 0.0, 0.70710678)
+                .to_degrees()
+                .round(),
+            -90.0
+        );
+    }
+}
