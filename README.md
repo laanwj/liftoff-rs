@@ -13,7 +13,7 @@ Tools and background services for CRSF joystick and telemetry, to use the quadco
 ┃   ELRS   ┃        ┌─────────┐     ┌───────┐
 ┃ receiver ◀────────▶ forward ◀─────▶ input ▶─────────┐
 ┗━━━━━━━━━━┛ serial └─────────┘ UDP └───▲───┘         │
-             CRSF               CRSF    │             │ uevent
+             CRSF               CRSF    │             │ uinput
                                         │ UDP         │
                                    ┌────▲───┐     ╔═══▼═════╗
                                    │ router ◀─────◀ liftoff ║
