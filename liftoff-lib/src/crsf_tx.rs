@@ -103,3 +103,52 @@ pub fn generate_crsf_telemetry(rec: &TelemetryPacket) -> Vec<Vec<u8>> {
 
     packets
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::telemetry::TelemetryPacket;
+
+    #[test]
+    fn test_generate_crsf_telemetry_empty() {
+        let rec = TelemetryPacket {
+            timestamp: None,
+            position: None,
+            attitude: None,
+            velocity: None,
+            gyro: None,
+            input: None,
+            battery: None,
+            motor_rpm: None,
+        };
+        let packets = generate_crsf_telemetry(&rec);
+        assert!(packets.is_empty());
+    }
+
+    #[test]
+    fn test_generate_crsf_telemetry_full() {
+        let rec = TelemetryPacket {
+            timestamp: Some(123.45),
+            position: Some([10.0, 100.0, 20.0]), // x, z(alt), y
+            attitude: Some([0.0, 0.0, 0.0, 1.0]), // Identity quaternion
+            velocity: Some([10.0, 0.0, 0.0]), // 10m/s X velocity
+            gyro: None,
+            input: None,
+            battery: Some([0.5, 12.0]), // 50%, 12V
+            motor_rpm: Some(vec![1000.0, 2000.0]),
+        };
+
+        let packets = generate_crsf_telemetry(&rec);
+        assert!(!packets.is_empty());
+
+        // Check for specific packet types
+        let packet_types: Vec<u8> = packets.iter().map(|p| p[0]).collect();
+        assert!(packet_types.contains(&(PacketType::Gps as u8)));
+        assert!(packet_types.contains(&(PacketType::BatterySensor as u8)));
+        assert!(packet_types.contains(&(PacketType::Vario as u8))); // Generated from velocity
+        assert!(packet_types.contains(&(PacketType::Attitude as u8)));
+        assert!(packet_types.contains(&(PacketType::BaroAlt as u8))); // Generated from position
+        assert!(packet_types.contains(&(PacketType::Airspeed as u8))); // Generated from velocity
+        assert!(packet_types.contains(&(PacketType::Rpm as u8)));
+    }
+}

@@ -144,3 +144,46 @@ pub fn parse_packet(data: &[u8], format: &[String]) -> Result<TelemetryPacket, &
         motor_rpm,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_packet_timestamp() {
+        // 123.4 as f32 le bytes: 0xcd, 0xcc, 0xf6, 0x42
+        let data = [0xcd, 0xcc, 0xf6, 0x42];
+        let format = vec!["Timestamp".to_string()];
+        let pkt = parse_packet(&data, &format).unwrap();
+        assert!(pkt.timestamp.is_some());
+        assert!((pkt.timestamp.unwrap() - 123.4).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_parse_packet_position() {
+        // 3 floats: 1.0, 2.0, 3.0
+        let mut data = Vec::new();
+        data.extend_from_slice(&(1.0f32).to_le_bytes());
+        data.extend_from_slice(&(2.0f32).to_le_bytes());
+        data.extend_from_slice(&(3.0f32).to_le_bytes());
+        let format = vec!["Position".to_string()];
+        let pkt = parse_packet(&data, &format).unwrap();
+        assert_eq!(pkt.position, Some([1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn test_parse_packet_short_buffer() {
+        let data = [0x00];
+        let format = vec!["Timestamp".to_string()];
+        let res = parse_packet(&data, &format);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_parse_packet_unknown_field() {
+        let data = [];
+        let format = vec!["Unknown".to_string()];
+        let res = parse_packet(&data, &format);
+        assert!(res.is_err());
+    }
+}

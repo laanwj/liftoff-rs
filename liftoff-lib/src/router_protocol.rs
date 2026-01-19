@@ -23,3 +23,16 @@ impl Opcode {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_opcode_from_u8() {
+        assert_eq!(Opcode::from_u8(0x00), Some(Opcode::Register));
+        assert_eq!(Opcode::from_u8(0x01), Some(Opcode::Unregister));
+        assert_eq!(Opcode::from_u8(0x02), None);
+        assert_eq!(Opcode::from_u8(0xFF), None);
+    }
+}

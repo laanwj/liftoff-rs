@@ -44,14 +44,52 @@ mod tests {
 
     #[test]
     fn test_quat2heading() {
-        // N 0,0,0,1 -> 0
+        // N  0.000, 0.000, 0.000, 1.000     0
         assert_eq!(quat2heading(0.0, 0.0, 0.0, 1.0).to_degrees().round(), 0.0);
-        // W 0,-0.707,0,0.707 -> -90
+        // W  0.000,-0.707, 0.000, 0.707   -90
         assert_eq!(
             quat2heading(0.0, -0.70710678, 0.0, 0.70710678)
                 .to_degrees()
                 .round(),
             -90.0
         );
+        // S  0.000,-1.000, 0.000, 0.000   180
+        assert_eq!(
+            quat2heading(0.0, -0.1, 0.0, 0.0)
+                .to_degrees()
+                .round(),
+            180.0
+        );
+        // E  0.000,-0.707, 0.000,-0.707    90
+        assert_eq!(
+            quat2heading(0.0, -0.70710678, 0.0, -0.70710678)
+                .to_degrees()
+                .round(),
+            90.0
+        );
+    }
+
+    #[test]
+    fn test_gps_from_coord() {
+        let base = (10.0, 50.0); // Lon, Lat
+        let coord = [100.0, 100.0, 100.0]; // x (lon), alt, y (lat)
+        // x is roughly east, y is roughly north.
+        let (lon, lat, alt) = gps_from_coord(&coord, base);
+
+        assert_eq!(alt, 100.0);
+        assert!(lat > base.1); // Should be north of base
+        assert!(lon > base.0); // Should be east of base
+
+        // Rough check: 1 degree lat is ~111km, 100m is ~0.0009 degrees
+        assert!((lat - base.1).abs() < 0.01);
+        assert!((lon - base.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_quat2eulers_identity() {
+        let (roll, pitch, yaw) = quat2eulers(0.0, 0.0, 0.0, 1.0);
+        assert_eq!(roll, 0.0);
+        assert_eq!(pitch, 0.0);
+        assert_eq!(yaw, 0.0);
     }
 }
