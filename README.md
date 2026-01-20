@@ -14,12 +14,12 @@ Tools and background services for CRSF joystick and telemetry, to use the quadco
 ┃ receiver ◀────────▶ forward ◀─────▶ input ▶─────────┐
 ┗━━━━━━━━━━┛ serial └─────────┘ UDP └───▲───┘         │
              CRSF               CRSF    │             │ uinput
-                                        │ UDP         │
+                                        │ UDP tlm     │
                                    ┌────▲───┐     ╔═══▼═════╗
                                    │ router ◀─────◀ liftoff ║
                                    └────▼───┘ UDP ║   sim   ║
-                                        │ UDP     ╚═════════╝
-                                        │
+                                    UDP │     tlm ╚═════════╝
+                                    tlm │         
  ─ this repository                  ┌───▼──┐       ╔══════╗
  ═ external software                │ gpsd ▶───────▶ QGIS ║
  ━ hardware                         └──────┘       ╚══════╝
@@ -27,7 +27,7 @@ Tools and background services for CRSF joystick and telemetry, to use the quadco
                                                              
 - `liftoff-forward`: CRSF forwarder. Forward CRSF control and telemetry between a ELRS receiver UDP sockets
 - `liftoff-gpsd`: gpsd emulator for viewing liftoff telemetry in QGIS
-- `liftoff-router`: Telemetry router. Receives liftoff's native UDP telemetry and broadcasts it to multiple scripts and applications
+- `liftoff-router`: Telemetry router. Receives liftoff's native UDP telemetry and broadcasts it to subscribers
 - `liftoff-input`: CRSF joystick. Receives CRSF packets over UDP and simulates a linux udev joystick. Sends back telemetry from liftoff to UDP
 
 This project makes use of `tokio` for reliable, high-performance asynchronous I/O.
