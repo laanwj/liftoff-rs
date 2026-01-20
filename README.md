@@ -32,7 +32,32 @@ Tools and background services for CRSF joystick and telemetry, to use the quadco
 
 This project makes use of `tokio` for reliable, high-performance asynchronous I/O.
 
-## Setting up liftoff's telemetry stream
+## Hardware
+
+Any kind of ELRS receiver module will do.
+
+<img src="assets/radiomaster-rp2.png" alt="Schematic of Radiomaster RP2" width="25%">
+
+The one that was used during development is a Radiomaster RP2 V2 ExpressLRS 2.4ghz Nano RX, soldered to an USB-serial dongle. The USB-serial dongle needs to be stable at the non-standard baudrate of `420000`. The I/O voltage is for ELRS receivers is 5V. To wire it directly to a Raspberry Pi's GPIO pins, which have a logic level of 3.3V, a level converter is needed.
+
+```
+┌────┬────┬────┬────┐
+│ RX │ TX │ 5V │ G  │
+└──▲─┴──▼─┴──■─┴──■─┘
+   │   ┌┘    │    │
+   └───│┐    │    │
+   ┌───┘│    │    │
+   │    │    │    │
+┌──▼─┬──▲─┬──■─┬──■─┐
+│ RX │ TX │ 5V │ G  │
+└────┴────┴────┴────┘
+```
+
+Make sure to bind your ELRS radio with the receiver, either through a binding phrase or triple-power-cycle.
+
+## Setting up the software
+
+### Setting up liftoff's telemetry stream
 
 Create a file `TelemetryConfiguration.json` in liftoff's game configuration directory, with the following contents:
 
@@ -54,14 +79,14 @@ Create a file `TelemetryConfiguration.json` in liftoff's game configuration dire
 
 On Linux this will usually be `~/.config/unity3d/LuGus Studios/Liftoff/`. The exact path depends on the operating system and/or install location. Details can be found here: [Liftoff - Drone Telemetry](https://steamcommunity.com/sharedfiles/filedetails/?id=3160488434). This also works for Liftoff: Micro Drones.
 
-## Building
+### Building
 
 ```
 cargo build --release
 cargo test --release
 ```
 
-## Running
+### Running
 
 Below are the command-line help for the all the services. All services are optional. For example, if you don't use `gpsd`, there is no need to run it.
 
@@ -123,7 +148,7 @@ Options:
           Print version
 ```
 
-## Logging
+### Logging
 
 This project makes use of `env_logger` and uses the standard log verbosity levels and environment variables. For example, to show info level messages and up,
 
@@ -133,7 +158,7 @@ RUST_LOG=info target/release/liftoff-forward -p /dev/... -b 420000 ...
 
 To get super-verbose output for troubleshooting, use debug level `debug` or `trace`. The idea is that `debug` summarizes all I/O events, and `trace` shows the raw content of packets.
 
-## Metrics
+### Metrics
 
 Some of the services (currently only `forward`) make use of `metrics-rs` to track internal metrics for observability,
 
