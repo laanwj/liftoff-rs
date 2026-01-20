@@ -1,8 +1,10 @@
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use liftoff_lib::{geo, router_protocol};
 use liftoff_lib::telemetry::{self};
+use liftoff_lib::{geo, router_protocol};
 use log::{debug, info, warn};
+use metrics::{Unit, counter, describe_counter};
+use metrics_exporter_tcp::TcpBuilder;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -23,6 +25,14 @@ struct Args {
     /// GPS position update frequency.
     #[arg(short, long, default_value_t = 10)]
     frequency: u64,
+
+    /// Enable metrics reporting using metrics-rs-tcp-exporter.
+    #[arg(long, default_value_t = false)]
+    metrics_tcp: bool,
+
+    /// Bind address for metrics-rs-tcp-exporter.
+    #[arg(long, default_value = "127.0.0.1:5003")]
+    metrics_tcp_bind: std::net::SocketAddr,
 }
 
 // NMEA formatting helpers
@@ -105,6 +115,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting liftoff-gpsd on {}", args.gpsd_bind);
 
+    if args.metrics_tcp {
+        let builder = TcpBuilder::new().listen_address(args.metrics_tcp_bind);
+        builder
+            .install()
+            .expect("failed to install metrics TCP exporter");
+    }
+
+    describe_counter!(
+        "gpsd.telemetry.rx",
+        Unit::Count,
+        "Telemetry packets received"
+    );
+    describe_counter!("gpsd.client.accept", Unit::Count, "Clients accepted");
+    describe_counter!("gpsd.nmea.tx", Unit::Count, "NMEA sentences sent");
+
     // Telemetry Receiver logic
     let sock_tel = UdpSocket::bind("0.0.0.0:0").await?;
     info!("Connecting telemetry to {}", args.telemetry_addr);
@@ -124,7 +149,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = interval(router_protocol::KEEPALIVE_INTERVAL);
         loop {
             interval.tick().await;
-            if let Err(e) = sock_tel.send(&[router_protocol::Opcode::Register as u8]).await {
+            if let Err(e) = sock_tel
+                .send(&[router_protocol::Opcode::Register as u8])
+                .await
+            {
                 warn!("Failed to send keepalive: {}", e);
             }
         }
@@ -147,6 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             match sock_tel_rx.recv(&mut buf).await {
                 Ok(len) => {
+                    counter!("gpsd.telemetry.rx").increment(1);
                     if let Ok(packet) = telemetry::parse_packet(&buf[0..len], &config_format) {
                         if let Ok(mut lock) = tx.write() {
                             // Store packet with timestamp
@@ -165,6 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let (mut socket, addr) = listener.accept().await?;
         info!("Accepted connection from {}", addr);
+        counter!("gpsd.client.accept").increment(1);
         let rx = rx.clone();
         let freq = args.frequency;
 
@@ -252,6 +282,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             for sentence_out in sentences {
                                 debug!("out {}", sentence_out);
                                 writer.write_all(sentence_out.as_bytes()).await.ok();
+                                counter!("gpsd.nmea.tx").increment(1);
                             }
                         }
                     } else {

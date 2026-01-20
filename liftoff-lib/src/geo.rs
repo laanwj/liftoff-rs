@@ -55,9 +55,7 @@ mod tests {
         );
         // S  0.000,-1.000, 0.000, 0.000   180
         assert_eq!(
-            quat2heading(0.0, -0.1, 0.0, 0.0)
-                .to_degrees()
-                .round(),
+            quat2heading(0.0, -1.0, 0.0, 0.0).to_degrees().round(),
             180.0
         );
         // E  0.000,-0.707, 0.000,-0.707    90

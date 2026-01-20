@@ -1,8 +1,8 @@
 use clap::Parser;
-use metrics::{counter, describe_counter, describe_histogram, histogram, Unit};
-use metrics_exporter_tcp::TcpBuilder;
 use liftoff_lib::crsf::{self};
 use log::{error, info, trace, warn};
+use metrics::{Unit, counter, describe_counter, describe_histogram, histogram};
+use metrics_exporter_tcp::TcpBuilder;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UdpSocket;
@@ -36,8 +36,7 @@ struct Args {
     metrics_tcp_bind: std::net::SocketAddr,
 }
 
-async fn udp_forward_loop(rx: Arc<UdpSocket>, tx: tokio::sync::mpsc::Sender<Vec<u8>>, name: &str)
-{
+async fn udp_forward_loop(rx: Arc<UdpSocket>, tx: tokio::sync::mpsc::Sender<Vec<u8>>, name: &str) {
     let mut buf = [0u8; 64];
     loop {
         match rx.recv(&mut buf).await {
@@ -64,15 +63,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.metrics_tcp {
         let builder = TcpBuilder::new().listen_address(args.metrics_tcp_bind);
-        builder.install().expect("failed to install metrics TCP exporter");
+        builder
+            .install()
+            .expect("failed to install metrics TCP exporter");
     }
 
-    describe_counter!("crsf.tx.count", Unit::Count, "Sent telemetry CRSF packet count");
+    describe_counter!(
+        "crsf.tx.count",
+        Unit::Count,
+        "Sent telemetry CRSF packet count"
+    );
     describe_counter!("crsf.rx.count", Unit::Count, "Received CRSF packet count");
-    describe_counter!("crsf.rx.valid", Unit::Count, "Valid received CRSF packet count");
-    describe_counter!("crsf.rx.crc_err", Unit::Count, "Number of received CRSF packets with CRC mismatch");
+    describe_counter!(
+        "crsf.rx.valid",
+        Unit::Count,
+        "Valid received CRSF packet count"
+    );
+    describe_counter!(
+        "crsf.rx.crc_err",
+        Unit::Count,
+        "Number of received CRSF packets with CRC mismatch"
+    );
     describe_histogram!("crsf.rx.packet_size", Unit::Bytes, "Receive packet size");
-    describe_histogram!("crsf.tx.packet_size", Unit::Bytes, "Sent telemetry packet size");
+    describe_histogram!(
+        "crsf.tx.packet_size",
+        Unit::Bytes,
+        "Sent telemetry packet size"
+    );
 
     info!("Starting liftoff-forward");
     info!("Serial Port: {} @ {}", args.port, args.baud);
@@ -112,7 +129,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut writer_handle = tokio::spawn(async move {
         while let Some(packet) = rx.recv().await {
             let len = packet.len();
-            if len > 61 { // 3 bytes are added, total size may not exceed 64.
+            if len > 61 {
+                // 3 bytes are added, total size may not exceed 64.
                 warn!("Packet too large: {}", len);
                 continue;
             }
@@ -168,7 +186,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let len = buf[1] as usize; // Length of Payload + CRC
                             let total_len = len + 2; // Sync + Len + Payload + CRC
 
-                            if total_len > 64 { // "Each CRSF frame is not longer than 64 bytes (including the Sync and CRC bytes)"
+                            if total_len > 64 {
+                                // "Each CRSF frame is not longer than 64 bytes (including the Sync and CRC bytes)"
                                 // This packet would be too long. Drop sync byte and try again.
                                 buf.remove(0);
                                 continue;

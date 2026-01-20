@@ -23,7 +23,6 @@ impl Opcode {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+metrics = "0.24.3"
+metrics-exporter-tcp = "0.11.1"
 clap = { version = "4.5.54", features = ["derive"] }
 env_logger = "0.11.8"
 liftoff-lib = { version = "0.1.0", path = "../liftoff-lib" }

@@ -168,7 +168,7 @@ To get super-verbose output for troubleshooting, use debug level `debug` or `tra
 
 ### Metrics
 
-Some of the services (currently only `forward`) make use of `metrics-rs` to track internal metrics for observability,
+The services make use of `metrics-rs` to track internal metrics for observability,
 
 ```
 target/release/liftoff-forward --metrics-tcp --metrics-tcp-bind 127.0.0.1:5000

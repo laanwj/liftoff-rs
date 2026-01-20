@@ -1,6 +1,8 @@
 use clap::Parser;
 use liftoff_lib::router_protocol::Opcode;
 use log::{debug, error, info, trace, warn};
+use metrics::{Unit, counter, describe_counter, describe_gauge, gauge};
+use metrics_exporter_tcp::TcpBuilder;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -18,6 +20,14 @@ struct Args {
     /// Bind address for incoming telemetry.
     #[arg(long, default_value = "127.0.0.1:9001")]
     tel_bind: std::net::SocketAddr,
+
+    /// Enable metrics reporting using metrics-rs-tcp-exporter.
+    #[arg(long, default_value_t = false)]
+    metrics_tcp: bool,
+
+    /// Bind address for metrics-rs-tcp-exporter.
+    #[arg(long, default_value = "127.0.0.1:5001")]
+    metrics_tcp_bind: std::net::SocketAddr,
 }
 
 #[tokio::main]
@@ -28,6 +38,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting telemetry router");
     info!("Command listener on {}", args.cmd_bind);
     info!("Telemetry listener on {}", args.tel_bind);
+
+    if args.metrics_tcp {
+        let builder = TcpBuilder::new().listen_address(args.metrics_tcp_bind);
+        builder
+            .install()
+            .expect("failed to install metrics TCP exporter");
+    }
+
+    describe_counter!(
+        "router.packet.rx",
+        Unit::Count,
+        "Incoming telemetry packets"
+    );
+    describe_counter!(
+        "router.packet.tx",
+        Unit::Count,
+        "Forwarded telemetry packets"
+    );
+    describe_counter!("router.cmd.rx", Unit::Count, "Commands received");
+    describe_gauge!(
+        "router.clients.count",
+        Unit::Count,
+        "Number of registered clients"
+    );
 
     let sock_cmd = Arc::new(UdpSocket::bind(&args.cmd_bind).await?);
     let sock_tel = Arc::new(UdpSocket::bind(&args.tel_bind).await?);
@@ -43,6 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match sock_cmd_rx.recv_from(&mut buf).await {
                 Ok((len, addr)) => {
                     debug!("rx cmd {:02x?}", &buf[0..len]);
+                    counter!("router.cmd.rx").increment(1);
                     if len > 0 {
                         if let Some(op) = Opcode::from_u8(buf[0]) {
                             let mut c = clients_cmd.lock().await;
@@ -64,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if log_clients {
                                 info!("Clients: {:?}", c);
                             }
+                            gauge!("router.clients.count").set(c.len() as f64);
                         }
                     }
                 }
@@ -80,6 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match res {
                     Ok((len, _addr)) => {
                         trace!("rx tel {:02x?}", &buf[0..len]);
+                        counter!("router.packet.rx").increment(1);
                         let data = &buf[0..len];
                         let mut to_remove = Vec::new();
                         let mut c = clients.lock().await;
@@ -87,6 +124,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Err(e) = sock_cmd.send_to(data, client).await {
                                 warn!("Failed to send to {}: {}", client, e);
                                 to_remove.push(*client);
+                            } else {
+                                counter!("router.packet.tx").increment(1);
                             }
                         }
 
@@ -100,6 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 info!("Clients: {:?}", c);
                             }
                         }
+                        gauge!("router.clients.count").set(c.len() as f64);
                     }
                     Err(e) => error!("Telemetry socket error: {}", e),
                 }

@@ -585,6 +585,8 @@ dependencies = [
  "env_logger",
  "liftoff-lib",
  "log",
+ "metrics",
+ "metrics-exporter-tcp",
  "serde",
  "serde_json",
  "tokio",
@@ -599,6 +601,8 @@ dependencies = [
  "evdev",
  "liftoff-lib",
  "log",
+ "metrics",
+ "metrics-exporter-tcp",
  "tokio",
 ]
 
@@ -623,6 +627,8 @@ dependencies = [
  "env_logger",
  "liftoff-lib",
  "log",
+ "metrics",
+ "metrics-exporter-tcp",
  "tokio",
 ]
 

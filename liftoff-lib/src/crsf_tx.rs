@@ -129,9 +129,9 @@ mod tests {
     fn test_generate_crsf_telemetry_full() {
         let rec = TelemetryPacket {
             timestamp: Some(123.45),
-            position: Some([10.0, 100.0, 20.0]), // x, z(alt), y
+            position: Some([10.0, 100.0, 20.0]),  // x, z(alt), y
             attitude: Some([0.0, 0.0, 0.0, 1.0]), // Identity quaternion
-            velocity: Some([10.0, 0.0, 0.0]), // 10m/s X velocity
+            velocity: Some([10.0, 0.0, 0.0]),     // 10m/s X velocity
             gyro: None,
             input: None,
             battery: Some([0.5, 12.0]), // 50%, 12V

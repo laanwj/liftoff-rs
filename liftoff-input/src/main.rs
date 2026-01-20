@@ -6,6 +6,8 @@ use liftoff_lib::crsf_tx;
 use liftoff_lib::router_protocol;
 use liftoff_lib::telemetry::{self};
 use log::{error, info, trace, warn};
+use metrics::{Unit, counter, describe_counter};
+use metrics_exporter_tcp::TcpBuilder;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::UdpSocket;
@@ -22,6 +24,14 @@ struct Args {
     /// Address of telemetry router.
     #[arg(long, default_value = "127.0.0.1:9003")]
     telemetry_addr: std::net::SocketAddr,
+
+    /// Enable metrics reporting using metrics-rs-tcp-exporter.
+    #[arg(long, default_value_t = false)]
+    metrics_tcp: bool,
+
+    /// Bind address for metrics-rs-tcp-exporter.
+    #[arg(long, default_value = "127.0.0.1:5002")]
+    metrics_tcp_bind: std::net::SocketAddr,
 }
 
 const TELEMETRY_INTERVAL: Duration = Duration::from_millis(100);
@@ -111,6 +121,7 @@ impl InputState {
     }
 
     fn update(&mut self, channels: [u16; 16]) -> std::io::Result<()> {
+        counter!("input.uinput.update").increment(1);
         let dev = &mut self.device;
         let old = self.old_channels;
 
@@ -290,6 +301,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting liftoff-input on {}", args.bind);
 
+    if args.metrics_tcp {
+        let builder = TcpBuilder::new().listen_address(args.metrics_tcp_bind);
+        builder
+            .install()
+            .expect("failed to install metrics TCP exporter");
+    }
+
+    describe_counter!("input.crsf.rx", Unit::Count, "CRSF packets received");
+    describe_counter!(
+        "input.telemetry.rx",
+        Unit::Count,
+        "Telemetry packets received"
+    );
+    describe_counter!(
+        "input.telemetry.tx",
+        Unit::Count,
+        "CRSF telemetry packets sent"
+    );
+    describe_counter!(
+        "input.uinput.update",
+        Unit::Count,
+        "Updates to virtual input device"
+    );
+
     let sock_crsf = Arc::new(UdpSocket::bind(&args.bind).await?);
     let sock_tel = UdpSocket::bind("0.0.0.0:0").await?; // Bind to random port for telemetry return
 
@@ -314,7 +349,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = interval(router_protocol::KEEPALIVE_INTERVAL);
         loop {
             interval.tick().await;
-            if let Err(e) = sock_tel.send(&[router_protocol::Opcode::Register as u8]).await {
+            if let Err(e) = sock_tel
+                .send(&[router_protocol::Opcode::Register as u8])
+                .await
+            {
                 warn!("Failed to send keepalive: {}", e);
             }
         }
@@ -340,6 +378,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match sock_tel_rx.recv(&mut buf).await {
                 Ok(len) => {
                     trace!("rx tel {:02x?}", &buf[0..len]);
+                    counter!("input.telemetry.rx").increment(1);
                     let now = tokio::time::Instant::now();
                     if now >= next_send {
                         if let Ok(packet) = telemetry::parse_packet(&buf[0..len], &config_format) {
@@ -351,6 +390,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     trace!("tx tel {:02x?}", &pkt);
                                     if let Err(e) = sock_crsf_clone.send_to(&pkt, addr).await {
                                         warn!("Failed to forward CRSF telem: {}", e);
+                                    } else {
+                                        counter!("input.telemetry.tx").increment(1);
                                     }
                                 }
                             }
@@ -377,6 +418,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         drop(t);
 
         trace!("rx crsf {:02x?}", &buf[0..len]);
+        counter!("input.crsf.rx").increment(1);
 
         if len > 1 {
             // Check packet type.
