@@ -42,14 +42,14 @@ The one that was used during development is a Radiomaster RP2 V2 ExpressLRS 2.4g
 
 ```
 ┌────┬────┬────┬────┐
-│ RX │ TX │ 5V │ G  │
+│ RX │ TX │ 5V │ G  │  ELRS receiver
 └──▲─┴──▼─┴──■─┴──■─┘
    │   ┌┘    │    │
    └───│┐    │    │
    ┌───┘│    │    │
    │    │    │    │
 ┌──▼─┬──▲─┬──■─┬──■─┐
-│ RX │ TX │ 5V │ G  │
+│ RX │ TX │ 5V │ G  │  USB-serial
 └────┴────┴────┴────┘
 ```
 
