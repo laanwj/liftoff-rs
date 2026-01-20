@@ -114,27 +114,46 @@ Options:
 ```
 
 ```
+$ target/release/liftoff-router --help
 Usage: liftoff-router [OPTIONS]
 
 Options:
-      --cmd-bind <CMD_BIND>  Bind address for telemetry router [default: 127.0.0.1:9003]
-      --tel-bind <TEL_BIND>  Bind address for incoming telemetry [default: 127.0.0.1:9001]
-  -h, --help                 Print help
-  -V, --version              Print version
+      --cmd-bind <CMD_BIND>
+          Bind address for telemetry router [default: 127.0.0.1:9003]
+      --tel-bind <TEL_BIND>
+          Bind address for incoming telemetry [default: 127.0.0.1:9001]
+      --metrics-tcp
+          Enable metrics reporting using metrics-rs-tcp-exporter
+      --metrics-tcp-bind <METRICS_TCP_BIND>
+          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5001]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 ```
 Usage: liftoff-gpsd [OPTIONS]
 
 Options:
-      --gpsd-bind <GPSD_BIND>            Bind address for GPSD service [default: 127.0.0.1:2947]
-      --telemetry-addr <TELEMETRY_ADDR>  Address of telemetry router [default: 127.0.0.1:9003]
-  -f, --frequency <FREQUENCY>            GPS position update frequency [default: 10]
-  -h, --help                             Print help
-  -V, --version                          Print version
+      --gpsd-bind <GPSD_BIND>
+          Bind address for GPSD service [default: 127.0.0.1:2947]
+      --telemetry-addr <TELEMETRY_ADDR>
+          Address of telemetry router [default: 127.0.0.1:9003]
+  -f, --frequency <FREQUENCY>
+          GPS position update frequency [default: 10]
+      --metrics-tcp
+          Enable metrics reporting using metrics-rs-tcp-exporter
+      --metrics-tcp-bind <METRICS_TCP_BIND>
+          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5003]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 ```
+$ target/release/liftoff-input --help
 Usage: liftoff-input [OPTIONS]
 
 Options:
@@ -142,6 +161,10 @@ Options:
           Bind address for incoming CRSF UDP packets [default: 127.0.0.1:9005]
       --telemetry-addr <TELEMETRY_ADDR>
           Address of telemetry router [default: 127.0.0.1:9003]
+      --metrics-tcp
+          Enable metrics reporting using metrics-rs-tcp-exporter
+      --metrics-tcp-bind <METRICS_TCP_BIND>
+          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5002]
   -h, --help
           Print help
   -V, --version
