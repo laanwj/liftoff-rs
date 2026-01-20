@@ -148,6 +148,14 @@ Options:
           Print version
 ```
 
+### Setting up liftoff's input
+
+In-game, `liftoff-input` will appear as `CRSF joystick`. Select this and calibrate it.
+
+The RC channel values to joystick axis/button mappings are currently hard-coded in the function [InputState::update](liftoff-input/src/main.rs#L117).
+
+## Diagnostics
+
 ### Logging
 
 This project makes use of `env_logger` and uses the standard log verbosity levels and environment variables. For example, to show info level messages and up,
@@ -167,3 +175,4 @@ target/release/liftoff-forward --metrics-tcp --metrics-tcp-bind 127.0.0.1:5000
 ```
 
 These can then be connected to and shown using, for example, [metrics-observer](https://github.com/metrics-rs/metrics/tree/main/metrics-observer).
+
