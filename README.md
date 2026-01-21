@@ -173,7 +173,7 @@ Options:
 
 ### Setting up liftoff's input
 
-In-game, `liftoff-input` will appear as `CRSF joystick`. Select this and calibrate it.
+In-game, `liftoff-input` will appear as a controller named `CRSF joystick`. Select this and calibrate it.
 
 The RC channel values to joystick axis/button mappings are currently hard-coded in the function [InputState::update](liftoff-input/src/main.rs#L117).
 
@@ -199,3 +199,7 @@ target/release/liftoff-forward --metrics-tcp --metrics-tcp-bind 127.0.0.1:5000
 
 These can then be connected to and shown using, for example, [metrics-observer](https://github.com/metrics-rs/metrics/tree/main/metrics-observer).
 
+## Related projects
+
+- [elrs-joystick-control](https://github.com/kaack/elrs-joystick-control) - Kind of the opposite of this project: use USB joysticks to fly drones
+- [CRSFjoystick](https://github.com/mikeneiderhauser/CRSFJoystick) - Arduino-based firmware to map ELRS receiver to USB HID
