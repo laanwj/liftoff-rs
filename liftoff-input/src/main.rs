@@ -121,47 +121,47 @@ impl InputState {
     }
 
     fn update(&mut self, channels: [u16; 16]) -> std::io::Result<()> {
-        counter!("input.uinput.update").increment(1);
+        let mut events = Vec::<evdev::InputEvent>::new();
         let dev = &mut self.device;
         let old = self.old_channels;
 
         // 0 AIL (ABS_X)
         if channels[0] != old[0] {
-            dev.emit(&[evdev::InputEvent::new(
+            events.extend(&[evdev::InputEvent::new(
                 evdev::EventType::ABSOLUTE.0,
                 AbsoluteAxisCode::ABS_X.0,
                 channels[0] as i32,
-            )])?;
+            )]);
         }
         // 1 ELE (ABS_Y)
         if channels[1] != old[1] {
-            dev.emit(&[evdev::InputEvent::new(
+            events.extend(&[evdev::InputEvent::new(
                 evdev::EventType::ABSOLUTE.0,
                 AbsoluteAxisCode::ABS_Y.0,
                 channels[1] as i32,
-            )])?;
+            )]);
         }
         // 2 THR (ABS_Z)
         if channels[2] != old[2] {
-            dev.emit(&[evdev::InputEvent::new(
+            events.extend(&[evdev::InputEvent::new(
                 evdev::EventType::ABSOLUTE.0,
                 AbsoluteAxisCode::ABS_Z.0,
                 channels[2] as i32,
-            )])?;
+            )]);
         }
         // 3 RUD (ABS_RX)
         if channels[3] != old[3] {
-            dev.emit(&[evdev::InputEvent::new(
+            events.extend(&[evdev::InputEvent::new(
                 evdev::EventType::ABSOLUTE.0,
                 AbsoluteAxisCode::ABS_RX.0,
                 channels[3] as i32,
-            )])?;
+            )]);
         }
 
         // 4 SD disarm/arm button(s) + ABS_THROTTLE
         if channels[4] != old[4] {
             let val = channels[4] as i32;
-            dev.emit(&[
+            events.extend(&[
                 evdev::InputEvent::new(
                     evdev::EventType::KEY.0,
                     KeyCode::BTN_TRIGGER.0,
@@ -177,31 +177,31 @@ impl InputState {
                     AbsoluteAxisCode::ABS_THROTTLE.0,
                     val,
                 ),
-            ])?;
+            ]);
         }
 
         // 5 button SE (2POS, momentary) -> BTN_THUMB2
         if channels[5] != old[5] {
-            dev.emit(&[evdev::InputEvent::new(
+            events.extend(&[evdev::InputEvent::new(
                 evdev::EventType::KEY.0,
                 KeyCode::BTN_THUMB2.0,
                 if channels[5] >= AXIS_MID { 1 } else { 0 },
-            )])?;
+            )]);
         }
 
         // 6 S1-pot -> ABS_RUDDER
         if channels[6] != old[6] {
-            dev.emit(&[evdev::InputEvent::new(
+            events.extend(&[evdev::InputEvent::new(
                 evdev::EventType::ABSOLUTE.0,
                 AbsoluteAxisCode::ABS_RUDDER.0,
                 channels[6] as i32,
-            )])?;
+            )]);
         }
 
         // 7 button SA (2POS, fixed) -> BTN_BASE6 / BTN_BASE6+1 + ABS_WHEEL
         if channels[7] != old[7] {
             let val = channels[7] as i32;
-            dev.emit(&[
+            events.extend(&[
                 evdev::InputEvent::new(
                     evdev::EventType::KEY.0,
                     KeyCode::BTN_BASE6.0,
@@ -217,12 +217,12 @@ impl InputState {
                     AbsoluteAxisCode::ABS_WHEEL.0,
                     val,
                 ),
-            ])?;
+            ]);
         }
 
         // 8: RUD trim
         if channels[8] != old[8] {
-            dev.emit(&[
+            events.extend(&[
                 evdev::InputEvent::new(
                     evdev::EventType::KEY.0,
                     KeyCode::BTN_TOP.0,
@@ -233,11 +233,11 @@ impl InputState {
                     KeyCode::BTN_TOP2.0,
                     if channels[8] >= AXIS_3POS_RIGHT { 1 } else { 0 },
                 ),
-            ])?;
+            ]);
         }
         // 9: ELE trim
         if channels[9] != old[9] {
-            dev.emit(&[
+            events.extend(&[
                 evdev::InputEvent::new(
                     evdev::EventType::KEY.0,
                     KeyCode::BTN_PINKIE.0,
@@ -248,11 +248,11 @@ impl InputState {
                     KeyCode::BTN_BASE.0,
                     if channels[9] >= AXIS_3POS_RIGHT { 1 } else { 0 },
                 ),
-            ])?;
+            ]);
         }
         // 10: THR trim
         if channels[10] != old[10] {
-            dev.emit(&[
+            events.extend(&[
                 evdev::InputEvent::new(
                     evdev::EventType::KEY.0,
                     KeyCode::BTN_BASE2.0,
@@ -267,11 +267,11 @@ impl InputState {
                         0
                     },
                 ),
-            ])?;
+            ]);
         }
         // 11: AIL trim
         if channels[11] != old[11] {
-            dev.emit(&[
+            events.extend(&[
                 evdev::InputEvent::new(
                     evdev::EventType::KEY.0,
                     KeyCode::BTN_BASE4.0,
@@ -286,10 +286,15 @@ impl InputState {
                         0
                     },
                 ),
-            ])?;
+            ]);
         }
 
         self.old_channels = channels;
+
+        if !events.is_empty() {
+            counter!("input.uinput.update").increment(1);
+            dev.emit(&events)?;
+        }
         Ok(())
     }
 }
