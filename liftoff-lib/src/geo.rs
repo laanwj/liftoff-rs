@@ -14,6 +14,17 @@ pub fn gps_from_coord(coord: &[f64; 3], base: (f64, f64)) -> (f64, f64, f64) {
     (longitude, latitude, altitude)
 }
 
+pub fn coord_from_gps(gps: (f64, f64, f64), base: (f64, f64)) -> [f64; 3] {
+    let (lon, lat, alt) = gps;
+    let (base_lon, base_lat) = base;
+
+    let y = (lat - base_lat) * 111111.0;
+    let x = (lon - base_lon) * 111111.0 * (lat.to_radians().cos());
+    let z = y; // Z is North in our local frame logic for now, matching gps_from_coord input [x, alt, y(north)]
+
+    [x, alt, z]
+}
+
 pub fn quat2heading(q0: f64, q1: f64, q2: f64, q3: f64) -> f64 {
     let y = 2.0 * ((q2 * q0) + (q3 * q1));
     let x = q3.powi(2) + q2.powi(2) - q0.powi(2) - q1.powi(2);

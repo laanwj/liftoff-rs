@@ -1,7 +1,7 @@
 use clap::Parser;
 use evdev::uinput::VirtualDevice;
 use evdev::{AbsoluteAxisCode, AttributeSet, InputId, KeyCode, MiscCode, UinputAbsSetup};
-use liftoff_lib::crsf::{self, PacketType};
+use liftoff_lib::crsf::{self, CrsfPacket};
 use liftoff_lib::crsf_tx;
 use liftoff_lib::router_protocol;
 use liftoff_lib::telemetry::{self};
@@ -427,24 +427,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if len > 1 {
             // Check packet type.
-            // remote_input_server_crsf.py: handle_crsf_packet(devices, data[0], data[1:])
-            let type_byte = buf[0];
-            let payload = &buf[1..len];
+            if let Some(CrsfPacket::RcChannelsPacked(channels)) = crsf::parse_packet(&buf[0..len]) {
+                // Check range
+                if channels.channels.iter().any(|&c| c > AXIS_MAX) {
+                    warn!("Channel out of range: {:?}", channels.channels);
+                    continue;
+                }
 
-            if type_byte == PacketType::RcChannelsPacked as u8 {
-                if let Some(channels) = crsf::unpack_channels(payload) {
-                    // Check range
-                    if channels.iter().any(|&c| c > AXIS_MAX) {
-                        warn!("Channel out of range: {:?}", channels);
-                        continue;
-                    }
-
-                    let mut state = input_state.lock().await;
-                    if let Err(e) = state.update(channels) {
-                        error!("Failed to update uinput: {}", e);
-                    }
-                } else {
-                    warn!("Channels packet has wrong size");
+                let mut state = input_state.lock().await;
+                if let Err(e) = state.update(channels.channels) {
+                    error!("Failed to update uinput: {}", e);
                 }
             }
         }
