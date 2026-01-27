@@ -199,6 +199,10 @@ pub fn build_packet(packet: &CrsfPacket) -> Option<Vec<u8>> {
             payload.extend_from_slice(&bat.voltage.to_be_bytes());
             payload.extend_from_slice(&bat.current.to_be_bytes());
             let cap_bytes = bat.capacity.to_be_bytes();
+            if cap_bytes[0] != 0x00 {
+                // Overflow
+                return None;
+            }
             payload.extend_from_slice(&cap_bytes[1..]); // 3 bytes
             payload.push(bat.remaining);
         }
