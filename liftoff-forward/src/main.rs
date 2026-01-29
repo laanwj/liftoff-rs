@@ -54,8 +54,6 @@ async fn udp_forward_loop(rx: Arc<UdpSocket>, tx: tokio::sync::mpsc::Sender<Vec<
     }
 }
 
-const CRSF_SYNC: u8 = 0xC8;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -128,16 +126,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Task 1c: Channel -> Serial
     let mut writer_handle = tokio::spawn(async move {
         while let Some(packet) = rx.recv().await {
-            let len = packet.len();
-            if len > 61 {
-                // 3 bytes are added, total size may not exceed 64.
-                warn!("Packet too large: {}", len);
+            let frame_size = packet.len() + 3; // Add address, length and CRC
+            if frame_size > crsf::MAX_FRAME_SIZE {
+                warn!("Packet too large: {}", packet.len());
                 continue;
             }
 
-            let mut frame = Vec::with_capacity(len + 4);
-            frame.push(CRSF_SYNC);
-            frame.push((len + 1) as u8);
+            let mut frame = Vec::with_capacity(frame_size);
+            frame.push(crsf::device_address::FLIGHT_CONTROLLER); // We are the flight controller in this context.
+            frame.push((packet.len() + 1) as u8); // Add one byte for CRC
             frame.extend_from_slice(&packet);
 
             let crc = crsf::calc_crc8(&packet);
@@ -172,8 +169,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Process buffer
                     loop {
-                        // Find Sync
-                        if let Some(pos) = buf.iter().position(|&b| b == CRSF_SYNC) {
+                        // Find sync byte (we are the flight controller, in this context).
+                        if let Some(pos) = buf
+                            .iter()
+                            .position(|&b| b == crsf::device_address::FLIGHT_CONTROLLER)
+                        {
                             // Trim garbage before sync
                             if pos > 0 {
                                 buf.drain(0..pos);
@@ -186,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let len = buf[1] as usize; // Length of Payload + CRC
                             let total_len = len + 2; // Sync + Len + Payload + CRC
 
-                            if total_len > 64 {
+                            if total_len > crsf::MAX_FRAME_SIZE {
                                 // "Each CRSF frame is not longer than 64 bytes (including the Sync and CRC bytes)"
                                 // This packet would be too long. Drop sync byte and try again.
                                 buf.remove(0);

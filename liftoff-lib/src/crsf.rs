@@ -3,6 +3,9 @@ use num_enum::TryFromPrimitive;
 
 pub const CRC8_DVB_S2: Crc<u8> = Crc::<u8>::new(&CRC_8_DVB_S2);
 
+/// CRSF maximum frame size including address, length and CRC bytes.
+pub const MAX_FRAME_SIZE: usize = 64;
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 pub enum PacketType {
@@ -26,6 +29,16 @@ pub enum PacketType {
     ConfigRead = 0x2C,
     ConfigWrite = 0x2D,
     RadioId = 0x3A,
+}
+
+/// CRSF device addresses. These double as sync byte.
+pub mod device_address {
+    pub const BROADCAST: u8 = 0x00;
+    pub const FLIGHT_CONTROLLER: u8 = 0xC8;
+    pub const VTX: u8 = 0xCE;
+    pub const RADIO_TRANSMITTER: u8 = 0xEA;
+    pub const CRSF_RECEIVER: u8 = 0xEC;
+    pub const CRSF_TRANSMITTER: u8 = 0xEE;
 }
 
 #[derive(Debug, Clone)]
@@ -245,7 +258,12 @@ pub fn build_packet(packet: &CrsfPacket) -> Option<Vec<u8>> {
             return None;
         }
     }
-    Some(payload)
+    if (payload.len() + 3) > MAX_FRAME_SIZE {
+        // 3 bytes are added, total frame size may not exceed 64.
+        None
+    } else {
+        Some(payload)
+    }
 }
 
 pub fn parse_packet(payload: &[u8]) -> Option<CrsfPacket> {
