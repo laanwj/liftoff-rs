@@ -2,6 +2,8 @@ use crate::crsf::{self, CrsfPacket, build_packet};
 use crate::geo;
 use crate::telemetry::TelemetryPacket;
 
+const SOURCE_ADDRESS: u8 = crsf::device_address::FLIGHT_CONTROLLER;
+
 fn build_gps_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
     let position = rec.position?;
     let attitude = rec.attitude?;
@@ -32,7 +34,7 @@ fn build_gps_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
         alt: (alt + 1000.0) as u16,
         sats: 1,
     };
-    build_packet(&CrsfPacket::Gps(gps))
+    build_packet(SOURCE_ADDRESS, &CrsfPacket::Gps(gps))
 }
 
 fn build_battery_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
@@ -43,7 +45,7 @@ fn build_battery_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
         capacity: 0,
         remaining: (bat[0] * 100.0) as u8,
     };
-    build_packet(&CrsfPacket::Battery(battery))
+    build_packet(SOURCE_ADDRESS, &CrsfPacket::Battery(battery))
 }
 
 fn build_vario_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
@@ -51,7 +53,7 @@ fn build_vario_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
     let vario = crsf::Vario {
         vertical_speed: (velocity[1] * 100.0) as i16,
     };
-    build_packet(&CrsfPacket::Vario(vario))
+    build_packet(SOURCE_ADDRESS, &CrsfPacket::Vario(vario))
 }
 
 fn build_attitude_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
@@ -67,7 +69,7 @@ fn build_attitude_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
         roll: (roll * 10_000.0) as i16,
         yaw: (yaw * 10_000.0) as i16,
     };
-    build_packet(&CrsfPacket::Attitude(att))
+    build_packet(SOURCE_ADDRESS, &CrsfPacket::Attitude(att))
 }
 
 fn build_baro_alt_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
@@ -88,7 +90,7 @@ fn build_baro_alt_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
         alt: alt_packed as u16,
         vertical_speed: 0,
     };
-    build_packet(&CrsfPacket::BaroAlt(baro))
+    build_packet(SOURCE_ADDRESS, &CrsfPacket::BaroAlt(baro))
 }
 
 fn build_airspeed_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
@@ -97,7 +99,7 @@ fn build_airspeed_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
     let airspeed = crsf::Airspeed {
         speed: (vel3d * 3.6 * 10.0) as u16,
     };
-    build_packet(&CrsfPacket::Airspeed(airspeed))
+    build_packet(SOURCE_ADDRESS, &CrsfPacket::Airspeed(airspeed))
 }
 
 fn build_rpm_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
@@ -106,7 +108,7 @@ fn build_rpm_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
         source_id: 0,
         rpms: rpms.iter().map(|&r| r as u32).collect(),
     };
-    build_packet(&CrsfPacket::Rpm(rpm))
+    build_packet(SOURCE_ADDRESS, &CrsfPacket::Rpm(rpm))
 }
 
 pub fn generate_crsf_telemetry(rec: &TelemetryPacket) -> Vec<Vec<u8>> {
@@ -160,7 +162,7 @@ mod tests {
         assert!(!packets.is_empty());
 
         // Check for specific packet types
-        let packet_types: Vec<u8> = packets.iter().map(|p| p[0]).collect();
+        let packet_types: Vec<u8> = packets.iter().map(|p| p[2]).collect();
         assert!(packet_types.contains(&(PacketType::Gps as u8)));
         assert!(packet_types.contains(&(PacketType::BatterySensor as u8)));
         assert!(packet_types.contains(&(PacketType::Vario as u8))); // Generated from velocity

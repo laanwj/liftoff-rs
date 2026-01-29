@@ -189,89 +189,98 @@ fn pack_channels(channels: &[u16; 16]) -> Option<[u8; 22]> {
     Some(buf)
 }
 
-pub fn build_packet(packet: &CrsfPacket) -> Option<Vec<u8>> {
-    let mut payload = Vec::new();
+pub fn build_packet(address: u8, packet: &CrsfPacket) -> Option<Vec<u8>> {
+    let mut frame = Vec::new();
+    frame.push(address); // Address/sync byte
+    frame.push(0x00); // Length: fill in later
     match packet {
         CrsfPacket::Attitude(att) => {
-            payload.push(PacketType::Attitude as u8);
-            payload.extend_from_slice(&att.pitch.to_be_bytes());
-            payload.extend_from_slice(&att.roll.to_be_bytes());
-            payload.extend_from_slice(&att.yaw.to_be_bytes());
+            frame.push(PacketType::Attitude as u8);
+            frame.extend_from_slice(&att.pitch.to_be_bytes());
+            frame.extend_from_slice(&att.roll.to_be_bytes());
+            frame.extend_from_slice(&att.yaw.to_be_bytes());
         }
         CrsfPacket::Gps(gps) => {
-            payload.push(PacketType::Gps as u8);
-            payload.extend_from_slice(&gps.lat.to_be_bytes());
-            payload.extend_from_slice(&gps.lon.to_be_bytes());
-            payload.extend_from_slice(&gps.speed.to_be_bytes());
-            payload.extend_from_slice(&gps.heading.to_be_bytes());
-            payload.extend_from_slice(&gps.alt.to_be_bytes()); // alt + 1000
-            payload.push(gps.sats);
+            frame.push(PacketType::Gps as u8);
+            frame.extend_from_slice(&gps.lat.to_be_bytes());
+            frame.extend_from_slice(&gps.lon.to_be_bytes());
+            frame.extend_from_slice(&gps.speed.to_be_bytes());
+            frame.extend_from_slice(&gps.heading.to_be_bytes());
+            frame.extend_from_slice(&gps.alt.to_be_bytes()); // alt + 1000
+            frame.push(gps.sats);
         }
         CrsfPacket::Battery(bat) => {
-            payload.push(PacketType::BatterySensor as u8);
-            payload.extend_from_slice(&bat.voltage.to_be_bytes());
-            payload.extend_from_slice(&bat.current.to_be_bytes());
+            frame.push(PacketType::BatterySensor as u8);
+            frame.extend_from_slice(&bat.voltage.to_be_bytes());
+            frame.extend_from_slice(&bat.current.to_be_bytes());
             let cap_bytes = bat.capacity.to_be_bytes();
             if cap_bytes[0] != 0x00 {
                 // Overflow
                 return None;
             }
-            payload.extend_from_slice(&cap_bytes[1..]); // 3 bytes
-            payload.push(bat.remaining);
+            frame.extend_from_slice(&cap_bytes[1..]); // 3 bytes
+            frame.push(bat.remaining);
         }
         CrsfPacket::Vario(vario) => {
-            payload.push(PacketType::Vario as u8);
-            payload.extend_from_slice(&vario.vertical_speed.to_be_bytes());
+            frame.push(PacketType::Vario as u8);
+            frame.extend_from_slice(&vario.vertical_speed.to_be_bytes());
         }
         CrsfPacket::FlightMode(fm) => {
-            payload.push(PacketType::FlightMode as u8);
-            payload.extend_from_slice(fm.mode.as_bytes());
-            payload.push(0);
+            frame.push(PacketType::FlightMode as u8);
+            frame.extend_from_slice(fm.mode.as_bytes());
+            frame.push(0);
         }
         CrsfPacket::BaroAlt(baro) => {
-            payload.push(PacketType::BaroAlt as u8);
-            payload.extend_from_slice(&baro.alt.to_be_bytes());
-            payload.push(baro.vertical_speed);
+            frame.push(PacketType::BaroAlt as u8);
+            frame.extend_from_slice(&baro.alt.to_be_bytes());
+            frame.push(baro.vertical_speed);
         }
         CrsfPacket::Airspeed(airspeed) => {
-            payload.push(PacketType::Airspeed as u8);
-            payload.extend_from_slice(&airspeed.speed.to_be_bytes());
+            frame.push(PacketType::Airspeed as u8);
+            frame.extend_from_slice(&airspeed.speed.to_be_bytes());
         }
         CrsfPacket::Rpm(rpm) => {
-            payload.push(PacketType::Rpm as u8);
-            payload.push(rpm.source_id);
+            frame.push(PacketType::Rpm as u8);
+            frame.push(rpm.source_id);
             for &val in &rpm.rpms {
                 let bytes = val.to_be_bytes();
                 if bytes[0] != 0x00 {
                     // Overflow
                     return None;
                 }
-                payload.extend_from_slice(&bytes[1..]); // 3 bytes
+                frame.extend_from_slice(&bytes[1..]); // 3 bytes
             }
         }
         CrsfPacket::RcChannelsPacked(channels) => {
-            payload.push(PacketType::RcChannelsPacked as u8);
-            payload.extend_from_slice(&pack_channels(&channels.channels)?);
+            frame.push(PacketType::RcChannelsPacked as u8);
+            frame.extend_from_slice(&pack_channels(&channels.channels)?);
         }
         CrsfPacket::Unknown(_pt) => {
             // Cannot build unknown packet without data
             return None;
         }
     }
-    if (payload.len() + 3) > MAX_FRAME_SIZE {
-        // 3 bytes are added, total frame size may not exceed 64.
+    if (frame.len() + 1) > MAX_FRAME_SIZE {
+        // Total frame size with CRC byte may not exceed 64.
         None
     } else {
-        Some(payload)
+        // Fill in length. Length includes type byte and CRC byte, but not address and length.
+        frame[1] = (frame.len() - 2 + 1) as u8;
+        // Add CRC. CRC is computed over type byte and data only.
+        frame.push(calc_crc8(&frame[2..]));
+        Some(frame)
     }
 }
 
-pub fn parse_packet(payload: &[u8]) -> Option<CrsfPacket> {
-    if payload.is_empty() {
+/// Parse CRSF packet without checking CRC.
+pub fn parse_packet(frame: &[u8]) -> Option<CrsfPacket> {
+    // Check length. Length byte includes type byte and CRC, but not address and length byte.
+    if frame.len() < 4 || (frame[1] as usize) != (frame.len() - 2) {
         return None;
     }
-    let type_byte = payload[0];
-    let data = &payload[1..];
+    // We do not check the address byte, CRC here.
+    let type_byte = frame[2];
+    let data = &frame[3..frame.len() - 1];
     let packet_type = PacketType::try_from_primitive(type_byte).ok()?;
 
     match packet_type {
@@ -372,9 +381,28 @@ pub fn parse_packet(payload: &[u8]) -> Option<CrsfPacket> {
     }
 }
 
+/// Perform minimal CRSF packet validation and check CRC.
+pub fn frame_check_crc(frame: &[u8]) -> bool {
+    // Check length. Length byte includes type byte and CRC, but not address and length byte.
+    if frame.len() < 4 || (frame[1] as usize) != (frame.len() - 2) {
+        return false;
+    }
+    calc_crc8(&frame[2..frame.len() - 1]) == frame[frame.len() - 1]
+}
+
+/// Parse CRSF packet and check CRC.
+pub fn parse_packet_check(frame: &[u8]) -> Option<CrsfPacket> {
+    if frame_check_crc(frame) {
+        parse_packet(frame)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    const SOURCE_ADDRESS: u8 = device_address::FLIGHT_CONTROLLER;
 
     #[test]
     fn test_pack_unpack_channels() {
@@ -429,10 +457,13 @@ mod tests {
         let yaw_raw = (yaw_rad * 10000.0) as i16;
 
         let mut payload = Vec::new();
+        payload.push(SOURCE_ADDRESS);
+        payload.push(8); // Length
         payload.push(PacketType::Attitude as u8);
         payload.extend_from_slice(&pitch_raw.to_be_bytes());
         payload.extend_from_slice(&roll_raw.to_be_bytes());
         payload.extend_from_slice(&yaw_raw.to_be_bytes());
+        payload.push(0x00); // Dummy CRC
 
         match parse_packet(&payload) {
             Some(CrsfPacket::Attitude(att)) => {
@@ -455,6 +486,8 @@ mod tests {
         let sats = 8;
 
         let mut payload = Vec::new();
+        payload.push(SOURCE_ADDRESS);
+        payload.push(17); // Length
         payload.push(PacketType::Gps as u8);
         payload.extend_from_slice(&lat.to_be_bytes());
         payload.extend_from_slice(&lon.to_be_bytes());
@@ -462,6 +495,7 @@ mod tests {
         payload.extend_from_slice(&heading.to_be_bytes());
         payload.extend_from_slice(&alt.to_be_bytes());
         payload.push(sats);
+        payload.push(0x00); // Dummy CRC
 
         match parse_packet(&payload) {
             Some(CrsfPacket::Gps(gps)) => {
@@ -485,6 +519,8 @@ mod tests {
         let remaining = 80; // %
 
         let mut payload = Vec::new();
+        payload.push(SOURCE_ADDRESS);
+        payload.push(10); // Length
         payload.push(PacketType::BatterySensor as u8);
         payload.extend_from_slice(&voltage.to_be_bytes());
         payload.extend_from_slice(&current.to_be_bytes());
@@ -494,6 +530,7 @@ mod tests {
         payload.push(cap_bytes[2]);
         payload.push(cap_bytes[3]);
         payload.push(remaining);
+        payload.push(0x00); // Dummy CRC
 
         match parse_packet(&payload) {
             Some(CrsfPacket::Battery(bat)) => {
@@ -511,8 +548,11 @@ mod tests {
         // Payload: Type (1), vertical_speed (i16)
         let vspeed: i16 = -15; // -1.5 m/s
         let mut payload = Vec::new();
+        payload.push(SOURCE_ADDRESS);
+        payload.push(4); // Length
         payload.push(PacketType::Vario as u8);
         payload.extend_from_slice(&vspeed.to_be_bytes());
+        payload.push(0x00); // Dummy CRC
 
         match parse_packet(&payload) {
             Some(CrsfPacket::Vario(vario)) => {
@@ -527,9 +567,12 @@ mod tests {
         // Payload: Type (1), string null terminated
         let mode_str = "ACRO";
         let mut payload = Vec::new();
+        payload.push(SOURCE_ADDRESS);
+        payload.push((mode_str.len() + 1 + 2) as u8); // Length
         payload.push(PacketType::FlightMode as u8);
         payload.extend_from_slice(mode_str.as_bytes());
         payload.push(0); // Null terminator
+        payload.push(0x00); // Dummy CRC
 
         match parse_packet(&payload) {
             Some(CrsfPacket::FlightMode(fm)) => {
@@ -561,7 +604,15 @@ mod tests {
 
     #[test]
     fn test_parse_packet_unknown() {
-        let payload = [PacketType::LinkStatistics as u8, 1, 2, 3];
+        let payload = [
+            SOURCE_ADDRESS,
+            5,
+            PacketType::LinkStatistics as u8,
+            1,
+            2,
+            3,
+            0x00,
+        ];
         match parse_packet(&payload) {
             Some(CrsfPacket::Unknown(pt)) => assert_eq!(pt, PacketType::LinkStatistics),
             _ => panic!("Expected Unknown packet"),
@@ -579,9 +630,9 @@ mod tests {
             sats: 8,
         };
         let packet = CrsfPacket::Gps(gps.clone());
-        let built = build_packet(&packet).unwrap();
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
 
-        let parsed = parse_packet(&built).unwrap();
+        let parsed = parse_packet_check(&built).unwrap();
         if let CrsfPacket::Gps(p_gps) = parsed {
             assert_eq!(p_gps.lat, gps.lat);
             assert_eq!(p_gps.lon, gps.lon);
@@ -602,9 +653,9 @@ mod tests {
             yaw: 1000,
         };
         let packet = CrsfPacket::Attitude(att.clone());
-        let built = build_packet(&packet).unwrap();
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
 
-        let parsed = parse_packet(&built).unwrap();
+        let parsed = parse_packet_check(&built).unwrap();
         if let CrsfPacket::Attitude(p_att) = parsed {
             assert_eq!(p_att.pitch, att.pitch);
             assert_eq!(p_att.roll, att.roll);
@@ -623,7 +674,7 @@ mod tests {
             remaining: 50,
         };
         let packet = CrsfPacket::Battery(bat.clone());
-        let built = build_packet(&packet).unwrap();
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
 
         let parsed = parse_packet(&built).unwrap();
         if let CrsfPacket::Battery(p_bat) = parsed {
@@ -642,9 +693,9 @@ mod tests {
             vertical_speed: -100,
         };
         let packet = CrsfPacket::Vario(vario.clone());
-        let built = build_packet(&packet).unwrap();
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
 
-        let parsed = parse_packet(&built).unwrap();
+        let parsed = parse_packet_check(&built).unwrap();
         if let CrsfPacket::Vario(p_vario) = parsed {
             assert_eq!(p_vario.vertical_speed, vario.vertical_speed);
         } else {
@@ -658,9 +709,9 @@ mod tests {
             mode: "ACRO".to_string(),
         };
         let packet = CrsfPacket::FlightMode(mode.clone());
-        let built = build_packet(&packet).unwrap();
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
 
-        let parsed = parse_packet(&built).unwrap();
+        let parsed = parse_packet_check(&built).unwrap();
         if let CrsfPacket::FlightMode(p_mode) = parsed {
             assert_eq!(p_mode.mode, mode.mode);
         } else {
@@ -675,9 +726,9 @@ mod tests {
             vertical_speed: 10,
         };
         let packet = CrsfPacket::BaroAlt(baro.clone());
-        let built = build_packet(&packet).unwrap();
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
 
-        let parsed = parse_packet(&built).unwrap();
+        let parsed = parse_packet_check(&built).unwrap();
         if let CrsfPacket::BaroAlt(p_baro) = parsed {
             assert_eq!(p_baro.alt, baro.alt);
             assert_eq!(p_baro.vertical_speed, baro.vertical_speed);
@@ -690,9 +741,9 @@ mod tests {
     fn test_build_packet_airspeed() {
         let air = Airspeed { speed: 500 };
         let packet = CrsfPacket::Airspeed(air.clone());
-        let built = build_packet(&packet).unwrap();
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
 
-        let parsed = parse_packet(&built).unwrap();
+        let parsed = parse_packet_check(&built).unwrap();
         if let CrsfPacket::Airspeed(p_air) = parsed {
             assert_eq!(p_air.speed, air.speed);
         } else {
@@ -707,21 +758,21 @@ mod tests {
             rpms: vec![1000, 2000],
         };
         let packet = CrsfPacket::Rpm(rpm.clone());
-        let built = build_packet(&packet).unwrap();
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
 
         // Manual verification of built packet structure for RPM
-        // Type (1) + Source (1) + 3 bytes * 2
-        assert_eq!(built.len(), 1 + 1 + 6);
-        assert_eq!(built[0], PacketType::Rpm as u8);
-        assert_eq!(built[1], 1);
+        // Framing (4) + Source (1) + 3 bytes * 2
+        assert_eq!(built.len(), 4 + 1 + 6);
+        assert_eq!(built[2], PacketType::Rpm as u8);
+        assert_eq!(built[3], 1);
         // 1000 = 0x0003E8 -> 00 03 E8
-        assert_eq!(built[2], 0x00);
-        assert_eq!(built[3], 0x03);
-        assert_eq!(built[4], 0xE8);
+        assert_eq!(built[4], 0x00);
+        assert_eq!(built[5], 0x03);
+        assert_eq!(built[6], 0xE8);
         // 2000 = 0x0007D0 -> 00 07 D0
-        assert_eq!(built[5], 0x00);
-        assert_eq!(built[6], 0x07);
-        assert_eq!(built[7], 0xD0);
+        assert_eq!(built[7], 0x00);
+        assert_eq!(built[8], 0x07);
+        assert_eq!(built[9], 0xD0);
 
         // RPM value overflow.
         let rpm = Rpm {
@@ -729,7 +780,7 @@ mod tests {
             rpms: vec![0x1000000, 2000],
         };
         let packet = CrsfPacket::Rpm(rpm.clone());
-        let built = build_packet(&packet);
+        let built = build_packet(SOURCE_ADDRESS, &packet);
         assert_eq!(built, None);
     }
 
@@ -739,11 +790,11 @@ mod tests {
             channels: [0x123, 12, 13, 510, 10, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0x7ff],
         };
         let packet = CrsfPacket::RcChannelsPacked(rc_channels.clone());
-        let built = build_packet(&packet).unwrap();
-        assert_eq!(built.len(), 1 + 22);
-        assert_eq!(built[0], PacketType::RcChannelsPacked as u8);
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
+        assert_eq!(built.len(), 4 + 22);
+        assert_eq!(built[2], PacketType::RcChannelsPacked as u8);
 
-        let parsed = parse_packet(&built).unwrap();
+        let parsed = parse_packet_check(&built).unwrap();
         if let CrsfPacket::RcChannelsPacked(p_rc) = parsed {
             assert_eq!(p_rc.channels, rc_channels.channels);
         } else {
@@ -755,7 +806,7 @@ mod tests {
             channels: [0xfff, 0, 13, 510, 10, 0, 0, 0, 0, 0, 30, 0, 0, 0, 0, 0x7ff],
         };
         let packet = CrsfPacket::RcChannelsPacked(rc_channels.clone());
-        let built = build_packet(&packet);
+        let built = build_packet(SOURCE_ADDRESS, &packet);
         assert_eq!(built, None);
     }
 }

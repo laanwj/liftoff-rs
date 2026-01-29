@@ -78,15 +78,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Valid received CRSF packet count"
     );
     describe_counter!(
+        "crsf.tx.crc_err",
+        Unit::Count,
+        "Number of almost-sent CRSF packets with CRC mismatch"
+    );
+    describe_counter!(
         "crsf.rx.crc_err",
         Unit::Count,
         "Number of received CRSF packets with CRC mismatch"
     );
-    describe_histogram!("crsf.rx.packet_size", Unit::Bytes, "Receive packet size");
+    describe_histogram!("crsf.rx.frame_size", Unit::Bytes, "Receive frame size");
     describe_histogram!(
-        "crsf.tx.packet_size",
+        "crsf.tx.frame_size",
         Unit::Bytes,
-        "Sent telemetry packet size"
+        "Sent telemetry frame size"
     );
 
     info!("Starting liftoff-forward");
@@ -125,24 +130,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Task 1c: Channel -> Serial
     let mut writer_handle = tokio::spawn(async move {
-        while let Some(packet) = rx.recv().await {
-            let frame_size = packet.len() + 3; // Add address, length and CRC
+        while let Some(frame) = rx.recv().await {
+            let frame_size = frame.len();
             if frame_size > crsf::MAX_FRAME_SIZE {
-                warn!("Packet too large: {}", packet.len());
+                warn!("Packet too large: {}", frame_size);
                 continue;
             }
 
-            let mut frame = Vec::with_capacity(frame_size);
-            frame.push(crsf::device_address::FLIGHT_CONTROLLER); // We are the flight controller in this context.
-            frame.push((packet.len() + 1) as u8); // Add one byte for CRC
-            frame.extend_from_slice(&packet);
-
-            let crc = crsf::calc_crc8(&packet);
-            frame.push(crc);
-
             trace!("tx: {:02x?}", frame);
             counter!("crsf.tx.count").increment(1);
-            histogram!("crsf.tx.packet_size").record(frame.len() as f64);
+            histogram!("crsf.tx.frame_size").record(frame.len() as f64);
+
+            if !crsf::frame_check_crc(&frame) {
+                trace!("Invalid CRC on incoming telemetry packet");
+                counter!("crsf.tx.crc_err").increment(1);
+                continue;
+            }
 
             if let Err(e) = writer.write_all(&frame).await {
                 error!("Serial write error: {}", e);
@@ -196,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 break; // Need more data
                             }
                             counter!("crsf.rx.count").increment(1);
-                            histogram!("crsf.rx.packet_size").record(total_len as f64);
+                            histogram!("crsf.rx.frame_size").record(total_len as f64);
 
                             // Full packet found
                             let frame = &buf[0..total_len];
@@ -208,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 // Valid packet
                                 trace!("rx: {:02x?}", payload);
                                 counter!("crsf.rx.valid").increment(1);
-                                if let Err(e) = sock.send(payload).await {
+                                if let Err(e) = sock.send(frame).await {
                                     warn!("UDP send error: {}", e);
                                 }
                             } else {

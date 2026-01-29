@@ -315,6 +315,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     describe_counter!("input.crsf.rx", Unit::Count, "CRSF packets received");
     describe_counter!(
+        "input.crsf.rx_rc_channels",
+        Unit::Count,
+        "CRSF RC_CHANNELS packets received"
+    );
+    describe_counter!(
         "input.telemetry.rx",
         Unit::Count,
         "Telemetry packets received"
@@ -425,19 +430,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         trace!("rx crsf {:02x?}", &buf[0..len]);
         counter!("input.crsf.rx").increment(1);
 
-        if len > 1 {
-            // Check packet type.
-            if let Some(CrsfPacket::RcChannelsPacked(channels)) = crsf::parse_packet(&buf[0..len]) {
-                // Check range
-                if channels.channels.iter().any(|&c| c > AXIS_MAX) {
-                    warn!("Channel out of range: {:?}", channels.channels);
-                    continue;
-                }
+        // Check, parse packet and check type.
+        if let Some(CrsfPacket::RcChannelsPacked(channels)) = crsf::parse_packet_check(&buf[0..len])
+        {
+            counter!("input.crsf.rx_rc_channels").increment(1);
+            // Check range
+            if channels.channels.iter().any(|&c| c > AXIS_MAX) {
+                warn!("Channel out of range: {:?}", channels.channels);
+                continue;
+            }
 
-                let mut state = input_state.lock().await;
-                if let Err(e) = state.update(channels.channels) {
-                    error!("Failed to update uinput: {}", e);
-                }
+            let mut state = input_state.lock().await;
+            if let Err(e) = state.update(channels.channels) {
+                error!("Failed to update uinput: {}", e);
             }
         }
     }
