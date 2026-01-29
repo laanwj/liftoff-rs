@@ -190,7 +190,7 @@ fn pack_channels(channels: &[u16; 16]) -> Option<[u8; 22]> {
 }
 
 pub fn build_packet(address: u8, packet: &CrsfPacket) -> Option<Vec<u8>> {
-    let mut frame = Vec::new();
+    let mut frame = Vec::with_capacity(MAX_FRAME_SIZE);
     frame.push(address); // Address/sync byte
     frame.push(0x00); // Length: fill in later
     match packet {
