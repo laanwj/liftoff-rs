@@ -48,6 +48,29 @@ pub struct Attitude {
     pub yaw: i16,   // Radians * 1e4
 }
 
+impl Attitude {
+    /// Construct from pitch, roll and yaw in radians.
+    /// Returns `None` if any scaled value overflows `i16`.
+    pub fn from_radians(pitch: f32, roll: f32, yaw: f32) -> Option<Self> {
+        // `as i32` saturates out-of-range floats to i32::MIN/MAX, which try_from then rejects.
+        let to_i16 = |v: f32| i16::try_from((v * 10000.0) as i32).ok();
+        Some(Self {
+            pitch: to_i16(pitch)?,
+            roll: to_i16(roll)?,
+            yaw: to_i16(yaw)?,
+        })
+    }
+
+    /// Return pitch, roll and yaw as radians (f32).
+    pub fn as_radians(&self) -> (f32, f32, f32) {
+        (
+            self.pitch as f32 / 10000.0,
+            self.roll as f32 / 10000.0,
+            self.yaw as f32 / 10000.0,
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Gps {
     pub lat: i32,     // deg * 1e7

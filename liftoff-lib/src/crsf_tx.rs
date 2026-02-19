@@ -64,11 +64,7 @@ fn build_attitude_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
         attitude[2] as f64,
         attitude[3] as f64,
     );
-    let att = crsf::Attitude {
-        pitch: (pitch * 10_000.0) as i16,
-        roll: (roll * 10_000.0) as i16,
-        yaw: (yaw * 10_000.0) as i16,
-    };
+    let att = crsf::Attitude::from_radians(pitch as f32, roll as f32, yaw as f32)?;
     build_packet(SOURCE_ADDRESS, &CrsfPacket::Attitude(att))
 }
 
