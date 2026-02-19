@@ -26,14 +26,8 @@ fn build_gps_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
 
     let vel2d = (velocity[0].powi(2) + velocity[2].powi(2)).sqrt();
 
-    let gps = crsf::Gps {
-        lat: (lat * 10_000_000.0) as i32,
-        lon: (lon * 10_000_000.0) as i32,
-        speed: (vel2d * 3.6 * 10.0) as u16,
-        heading: (hdg_deg * 100.0) as u16,
-        alt: (alt + 1000.0) as u16,
-        sats: 1,
-    };
+    let speed_kmh = vel2d as f64 * 3.6;
+    let gps = crsf::Gps::from_values(lat, lon, alt, speed_kmh, hdg_deg, 1)?;
     build_packet(SOURCE_ADDRESS, &CrsfPacket::Gps(gps))
 }
 
@@ -50,9 +44,7 @@ fn build_battery_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
 
 fn build_vario_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
     let velocity = rec.velocity?;
-    let vario = crsf::Vario {
-        vertical_speed: (velocity[1] * 100.0) as i16,
-    };
+    let vario = crsf::Vario::from_ms(velocity[1] as f64)?;
     build_packet(SOURCE_ADDRESS, &CrsfPacket::Vario(vario))
 }
 
@@ -64,7 +56,7 @@ fn build_attitude_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
         attitude[2] as f64,
         attitude[3] as f64,
     );
-    let att = crsf::Attitude::from_radians(pitch as f32, roll as f32, yaw as f32)?;
+    let att = crsf::Attitude::from_radians(pitch, roll, yaw)?;
     build_packet(SOURCE_ADDRESS, &CrsfPacket::Attitude(att))
 }
 
@@ -74,18 +66,7 @@ fn build_baro_alt_packet(rec: &TelemetryPacket) -> Option<Vec<u8>> {
         &[position[0] as f64, position[1] as f64, position[2] as f64],
         (0.0, 0.0),
     );
-
-    let mut alt_packed = ((alt * 10.0) as i32) + 10000;
-    if alt_packed < 0 {
-        alt_packed = 0;
-    } else if alt_packed > 0x7fff {
-        alt_packed = 0x8000 | (alt as i32).min(0x7fff);
-    }
-
-    let baro = crsf::BaroAlt {
-        alt: alt_packed as u16,
-        vertical_speed: 0,
-    };
+    let baro = crsf::BaroAlt::from_values(alt, 0.0)?;
     build_packet(SOURCE_ADDRESS, &CrsfPacket::BaroAlt(baro))
 }
 

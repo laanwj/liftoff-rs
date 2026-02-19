@@ -51,9 +51,9 @@ pub struct Attitude {
 impl Attitude {
     /// Construct from pitch, roll and yaw in radians.
     /// Returns `None` if any scaled value overflows `i16`.
-    pub fn from_radians(pitch: f32, roll: f32, yaw: f32) -> Option<Self> {
+    pub fn from_radians(pitch: f64, roll: f64, yaw: f64) -> Option<Self> {
         // `as i32` saturates out-of-range floats to i32::MIN/MAX, which try_from then rejects.
-        let to_i16 = |v: f32| i16::try_from((v * 10000.0) as i32).ok();
+        let to_i16 = |v: f64| i16::try_from((v * 10000.0) as i32).ok();
         Some(Self {
             pitch: to_i16(pitch)?,
             roll: to_i16(roll)?,
@@ -61,12 +61,12 @@ impl Attitude {
         })
     }
 
-    /// Return pitch, roll and yaw as radians (f32).
-    pub fn as_radians(&self) -> (f32, f32, f32) {
+    /// Return pitch, roll and yaw as radians.
+    pub fn as_radians(&self) -> (f64, f64, f64) {
         (
-            self.pitch as f32 / 10000.0,
-            self.roll as f32 / 10000.0,
-            self.yaw as f32 / 10000.0,
+            self.pitch as f64 / 10000.0,
+            self.roll as f64 / 10000.0,
+            self.yaw as f64 / 10000.0,
         )
     }
 }
@@ -75,23 +75,88 @@ impl Attitude {
 pub struct Gps {
     pub lat: i32,     // deg * 1e7
     pub lon: i32,     // deg * 1e7
-    pub speed: u16,   // km/h * 10
+    pub speed: u16,   // km/h * 10 (spec says * 100, but real devices use * 10)
     pub heading: u16, // deg * 100
     pub alt: u16,     // m + 1000
     pub sats: u8,
 }
 
+impl Gps {
+    /// Construct from real-world values.
+    /// Returns `None` if any value overflows its wire representation.
+    pub fn from_values(
+        lat_deg: f64,
+        lon_deg: f64,
+        alt_m: f64,
+        speed_kmh: f64,
+        heading_deg: f64,
+        sats: u8,
+    ) -> Option<Self> {
+        // `as i64`/`as i32` saturates, then try_from rejects out-of-range.
+        Some(Self {
+            lat: i32::try_from((lat_deg * 1e7) as i64).ok()?,
+            lon: i32::try_from((lon_deg * 1e7) as i64).ok()?,
+            speed: u16::try_from((speed_kmh * 10.0) as i64).ok()?,
+            heading: u16::try_from((heading_deg * 100.0) as i64).ok()?,
+            alt: u16::try_from((alt_m + 1000.0) as i64).ok()?,
+            sats,
+        })
+    }
+
+    pub fn lat_deg(&self) -> f64 {
+        self.lat as f64 / 1e7
+    }
+
+    pub fn lon_deg(&self) -> f64 {
+        self.lon as f64 / 1e7
+    }
+
+    pub fn alt_m(&self) -> f64 {
+        self.alt as f64 - 1000.0
+    }
+
+    pub fn speed_kmh(&self) -> f64 {
+        self.speed as f64 / 10.0
+    }
+
+    pub fn heading_deg(&self) -> f64 {
+        self.heading as f64 / 100.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Battery {
-    pub voltage: u16,  // dV (0.1V)
-    pub current: u16,  // dA (0.1A)
+    pub voltage: u16,  // dV (spec says 10µV, but real devices use dV)
+    pub current: u16,  // dA (spec says 10µA, but real devices use dA)
     pub capacity: u32, // mAh
     pub remaining: u8, // %
 }
 
+impl Battery {
+    pub fn voltage_v(&self) -> f64 {
+        self.voltage as f64 / 10.0
+    }
+
+    pub fn current_a(&self) -> f64 {
+        self.current as f64 / 10.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Vario {
-    pub vertical_speed: i16, // dm/s
+    pub vertical_speed: i16, // cm/s
+}
+
+impl Vario {
+    pub fn from_ms(speed: f64) -> Option<Self> {
+        // `as i32` saturates, then try_from rejects out-of-range.
+        let vertical_speed = i16::try_from((speed * 100.0) as i32).ok()?;
+        Some(Self { vertical_speed })
+    }
+
+    pub fn vertical_speed_ms(&self) -> f64 {
+        self.vertical_speed as f64 / 100.0
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -101,13 +166,67 @@ pub struct FlightMode {
 
 #[derive(Debug, Clone)]
 pub struct BaroAlt {
-    pub alt: u16, // m + 1000
-    pub vertical_speed: u8,
+    pub alt: u16,             // MSB=0: decimeters + 10000dm offset; MSB=1: meters
+    pub vertical_speed: i8,   // log-scaled cm/s
+}
+
+impl BaroAlt {
+    const KL: f64 = 100.0;
+    const KR: f64 = 0.026;
+
+    /// Construct from altitude in meters and vertical speed in m/s.
+    pub fn from_values(alt_m: f64, vertical_speed_ms: f64) -> Option<Self> {
+        // Altitude: use decimeter precision if in range, otherwise meter precision.
+        let alt_dm = (alt_m * 10.0) as i32 + 10000;
+        let alt = if (0..=0x7fff).contains(&alt_dm) {
+            alt_dm as u16
+        } else {
+            let alt_int = alt_m as i32;
+            if !(0..=0x7fff).contains(&alt_int) {
+                return None;
+            }
+            0x8000 | alt_int as u16
+        };
+
+        // Vertical speed: log-scale encode.
+        let v_cms = vertical_speed_ms * 100.0;
+        let packed = (((v_cms.abs() / Self::KL).ln_1p() / Self::KR) as i8)
+            .checked_mul(v_cms.signum() as i8)?;
+
+        Some(Self {
+            alt,
+            vertical_speed: packed,
+        })
+    }
+
+    /// Decode altitude in meters.
+    pub fn alt_m(&self) -> f64 {
+        if self.alt & 0x8000 == 0 {
+            // Decimeters with offset
+            (self.alt as f64 - 10000.0) / 10.0
+        } else {
+            // Meters, no offset
+            (self.alt & 0x7fff) as f64
+        }
+    }
+
+    /// Decode vertical speed in m/s.
+    pub fn vertical_speed_ms(&self) -> f64 {
+        let v = self.vertical_speed;
+        let magnitude = ((v.unsigned_abs() as f64 * Self::KR).exp() - 1.0) * Self::KL;
+        magnitude.copysign(v as f64) / 100.0
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Airspeed {
     pub speed: u16, // km/h * 10
+}
+
+impl Airspeed {
+    pub fn speed_kmh(&self) -> f64 {
+        self.speed as f64 / 10.0
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -256,7 +375,7 @@ pub fn build_packet(address: u8, packet: &CrsfPacket) -> Option<Vec<u8>> {
         CrsfPacket::BaroAlt(baro) => {
             frame.push(PacketType::BaroAlt as u8);
             frame.extend_from_slice(&baro.alt.to_be_bytes());
-            frame.push(baro.vertical_speed);
+            frame.push(baro.vertical_speed as u8);
         }
         CrsfPacket::Airspeed(airspeed) => {
             frame.push(PacketType::Airspeed as u8);
@@ -369,7 +488,7 @@ pub fn parse_packet(frame: &[u8]) -> Option<CrsfPacket> {
                 return None;
             }
             let alt = u16::from_be_bytes([data[0], data[1]]);
-            let vertical_speed = data[2];
+            let vertical_speed = data[2] as i8;
             Some(CrsfPacket::BaroAlt(BaroAlt {
                 alt,
                 vertical_speed,
