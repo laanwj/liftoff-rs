@@ -12,3 +12,4 @@ tokio = { workspace = true }
 tokio-serial = "5.4.5"
 metrics = { workspace = true }
 metrics-exporter-tcp = { workspace = true }
+zenoh = { workspace = true }

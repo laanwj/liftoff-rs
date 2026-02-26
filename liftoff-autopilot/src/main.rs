@@ -1,15 +1,15 @@
 use clap::Parser;
 use liftoff_lib::crsf::{self, CrsfPacket};
 use liftoff_lib::geo;
+use liftoff_lib::topics;
 use log::{debug, info, warn};
 use nalgebra::{UnitQuaternion, Vector3};
 use serde::Deserialize;
 use std::f64::consts::PI;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant, interval};
+use zenoh::Config;
 
 /// Shortest signed angle from `from` to `to`, wrapped to [-π, π].
 fn angle_diff(to: f64, from: f64) -> f64 {
@@ -89,14 +89,6 @@ struct WaypointConfig {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Bind address for autopilot (telemetry in, channels out).
-    #[arg(long, default_value = "0.0.0.0:0")]
-    bind: SocketAddr,
-
-    /// Target address (liftoff-input).
-    #[arg(long, default_value = "127.0.0.1:9005")]
-    target: SocketAddr,
-
     /// Target Altitude (meters).
     #[arg(long, default_value_t = 10.0)]
     target_alt: f64,
@@ -104,6 +96,18 @@ struct Args {
     /// Path to waypoints JSON file.
     #[arg(long)]
     waypoints: Option<std::path::PathBuf>,
+
+    /// Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery.
+    #[arg(long)]
+    zenoh_connect: Option<String>,
+
+    /// Zenoh mode (peer or client).
+    #[arg(long, default_value = "peer")]
+    zenoh_mode: String,
+
+    /// Zenoh topic prefix.
+    #[arg(long, default_value = topics::DEFAULT_PREFIX)]
+    zenoh_prefix: String,
 }
 
 // PID Controller
@@ -378,12 +382,11 @@ impl Controller {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let args = Args::parse();
 
-    info!("Starting liftoff-autopilot on {}", args.bind);
-    info!("Targeting {}", args.target);
+    info!("Starting liftoff-autopilot");
 
     // Load waypoint config if provided
     let waypoint_config: Option<WaypointConfig> = if let Some(ref path) = args.waypoints {
@@ -403,25 +406,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // UDP Socket
-    let socket = Arc::new(UdpSocket::bind(args.bind).await?);
-    let target = args.target;
+    // Zenoh session
+    let mut config = Config::default();
+    config.insert_json5("mode", &format!(r#""{}""#, args.zenoh_mode))?;
+    if let Some(ref endpoint) = args.zenoh_connect {
+        config.insert_json5("connect/endpoints", &format!(r#"["{}"]"#, endpoint))?;
+    }
+
+    let session = zenoh::open(config).await?;
+
+    let crsf_tel_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_TELEMETRY);
+    let crsf_rc_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC);
+
+    info!("Subscribing to: {}", crsf_tel_topic);
+    info!("Publishing on: {}", crsf_rc_topic);
+
+    let tel_subscriber = session.declare_subscriber(&crsf_tel_topic).await?;
+    let rc_publisher = session.declare_publisher(&crsf_rc_topic).await?;
 
     let state = Arc::new(Mutex::new(DroneState::default()));
 
     // Telemetry Receiver Task
-    let socket_rx = socket.clone();
     let state_rx = state.clone();
     tokio::spawn(async move {
-        let mut buf = [0u8; 1024];
         loop {
-            match socket_rx.recv_from(&mut buf).await {
-                Ok((len, _src)) => {
-                    if len > 0 {
-                        if let Some(packet) = liftoff_lib::crsf::parse_packet(&buf[0..len]) {
+            match tel_subscriber.recv_async().await {
+                Ok(sample) => {
+                    let payload = sample.payload().to_bytes();
+                    if !payload.is_empty() {
+                        if let Some(packet) = liftoff_lib::crsf::parse_packet(&payload) {
                             let mut s = state_rx.lock().await;
-                            // Clone packet to use in multiple places if needed, or structured differently
-                            // Actually, we can just match on reference or clone what we need.
 
                             match &packet {
                                 CrsfPacket::Attitude(att) => {
@@ -492,7 +506,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                Err(e) => warn!("Recv error: {}", e),
+                Err(e) => {
+                    warn!("Telemetry subscriber error: {}", e);
+                    break;
+                }
             }
         }
     });
@@ -507,7 +524,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         controller.end_behavior = config.end_behavior.clone();
     }
 
-    let socket_tx = socket.clone();
     let start_time = Instant::now();
 
     let mut ticker = interval(Duration::from_millis(10)); // 100Hz
@@ -521,8 +537,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rc_packet = CrsfPacket::RcChannelsPacked(crsf::RcChannelsPacked { channels });
         let frame = crsf::build_packet(crsf::device_address::FLIGHT_CONTROLLER, &rc_packet)
             .expect("channel values out of range");
-        if let Err(e) = socket_tx.send_to(&frame, target).await {
-            warn!("Send error: {}", e);
+        if let Err(e) = rc_publisher.put(frame.as_slice()).await {
+            warn!("Publish error: {}", e);
         }
 
         if drone_state.gps_origin.is_some() {
@@ -663,8 +679,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let frame = crsf::build_packet(crsf::device_address::FLIGHT_CONTROLLER, &rc_packet)
             .expect("channel values out of range");
 
-        if let Err(e) = socket_tx.send_to(&frame, target).await {
-            warn!("Send error: {}", e);
+        if let Err(e) = rc_publisher.put(frame.as_slice()).await {
+            warn!("Publish error: {}", e);
         }
     }
 
@@ -676,11 +692,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rc_packet = CrsfPacket::RcChannelsPacked(crsf::RcChannelsPacked { channels });
         let frame = crsf::build_packet(crsf::device_address::FLIGHT_CONTROLLER, &rc_packet)
             .expect("channel values out of range");
-        if let Err(e) = socket_tx.send_to(&frame, target).await {
-            warn!("Send error: {}", e);
+        if let Err(e) = rc_publisher.put(frame.as_slice()).await {
+            warn!("Publish error: {}", e);
         }
         ticker.tick().await;
     }
     info!("Disarmed, exiting.");
+
+    session.close().await?;
     Ok(())
 }

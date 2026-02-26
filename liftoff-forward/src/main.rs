@@ -1,12 +1,12 @@
 use clap::Parser;
 use liftoff_lib::crsf::{self};
+use liftoff_lib::topics;
 use log::{error, info, trace, warn};
 use metrics::{Unit, counter, describe_counter, describe_histogram, histogram};
 use metrics_exporter_tcp::TcpBuilder;
-use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UdpSocket;
 use tokio_serial::SerialPortBuilderExt;
+use zenoh::Config;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -19,13 +19,17 @@ struct Args {
     #[arg(short, long, default_value_t = 420000)]
     baud: u32,
 
-    /// Destination for UDP packets.
-    #[arg(long, default_value = "127.0.0.1:9005")]
-    dest: std::net::SocketAddr,
+    /// Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery.
+    #[arg(long)]
+    zenoh_connect: Option<String>,
 
-    /// Source (bind) for UDP packets.
-    #[arg(long, default_value = "127.0.0.1:9006")]
-    src: std::net::SocketAddr,
+    /// Zenoh mode (peer or client).
+    #[arg(long, default_value = "peer")]
+    zenoh_mode: String,
+
+    /// Zenoh topic prefix.
+    #[arg(long, default_value = topics::DEFAULT_PREFIX)]
+    zenoh_prefix: String,
 
     /// Enable metrics reporting using metrics-rs-tcp-exporter.
     #[arg(long, default_value_t = false)]
@@ -36,26 +40,8 @@ struct Args {
     metrics_tcp_bind: std::net::SocketAddr,
 }
 
-async fn udp_forward_loop(rx: Arc<UdpSocket>, tx: tokio::sync::mpsc::Sender<Vec<u8>>, name: &str) {
-    let mut buf = [0u8; 64];
-    loop {
-        match rx.recv(&mut buf).await {
-            Ok(len) => {
-                let packet = buf[0..len].to_vec();
-                if tx.send(packet).await.is_err() {
-                    break;
-                }
-            }
-            Err(e) => {
-                error!("UDP {} recv error: {}", name, e);
-                break;
-            }
-        }
-    }
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let args = Args::parse();
 
@@ -96,66 +82,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting liftoff-forward");
     info!("Serial Port: {} @ {}", args.port, args.baud);
-    info!("UDP Dest: {}", args.dest);
-    info!("UDP Src: {}", args.src);
 
     let port = tokio_serial::new(&args.port, args.baud).open_native_async()?;
 
-    // UDP Sockets
-    let sock = UdpSocket::bind("0.0.0.0:0").await?;
-    sock.connect(&args.dest).await?;
+    // Zenoh session
+    let mut config = Config::default();
+    config.insert_json5("mode", &format!(r#""{}""#, args.zenoh_mode))?;
+    if let Some(ref endpoint) = args.zenoh_connect {
+        config.insert_json5("connect/endpoints", &format!(r#"["{}"]"#, endpoint))?;
+    }
 
-    let tel_sock = UdpSocket::bind(&args.src).await?;
+    let session = zenoh::open(config).await?;
 
-    // Wrap sockets in Arc
-    let sock = Arc::new(sock);
-    let tel_sock = Arc::new(tel_sock);
+    let crsf_tel_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_TELEMETRY);
+    let crsf_rc_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC);
+
+    info!("Subscribing to: {}", crsf_tel_topic);
+    info!("Publishing on: {}", crsf_rc_topic);
+
+    let tel_subscriber = session.declare_subscriber(&crsf_tel_topic).await?;
+    let rc_publisher = session.declare_publisher(crsf_rc_topic).await?;
 
     let (mut reader, mut writer) = tokio::io::split(port);
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
 
-    // Task 1a: Telemetry Socket -> Channel
-    let tel_sock_rx = tel_sock.clone();
-    let tx_1 = tx.clone();
-    tokio::spawn(async move {
-        udp_forward_loop(tel_sock_rx, tx_1, "tel").await;
-    });
-
-    // Task 1b: Destination Socket (Return traffic) -> Channel
-    let sock_rx = sock.clone();
-    let tx_2 = tx.clone();
-    tokio::spawn(async move {
-        udp_forward_loop(sock_rx, tx_2, "dest").await;
-    });
-
-    // Task 1c: Channel -> Serial
+    // Task: Zenoh CRSF telemetry -> Serial (with CRC check)
     let mut writer_handle = tokio::spawn(async move {
-        while let Some(frame) = rx.recv().await {
-            let frame_size = frame.len();
-            if frame_size > crsf::MAX_FRAME_SIZE {
-                warn!("Packet too large: {}", frame_size);
-                continue;
-            }
+        loop {
+            match tel_subscriber.recv_async().await {
+                Ok(sample) => {
+                    let frame = sample.payload().to_bytes();
+                    let frame_size = frame.len();
+                    if frame_size > crsf::MAX_FRAME_SIZE {
+                        warn!("Packet too large: {}", frame_size);
+                        continue;
+                    }
 
-            trace!("tx: {:02x?}", frame);
-            counter!("crsf.tx.count").increment(1);
-            histogram!("crsf.tx.frame_size").record(frame.len() as f64);
+                    trace!("tx: {:02x?}", &*frame);
+                    counter!("crsf.tx.count").increment(1);
+                    histogram!("crsf.tx.frame_size").record(frame.len() as f64);
 
-            if !crsf::frame_check_crc(&frame) {
-                trace!("Invalid CRC on incoming telemetry packet");
-                counter!("crsf.tx.crc_err").increment(1);
-                continue;
-            }
+                    if !crsf::frame_check_crc(&frame) {
+                        trace!("Invalid CRC on incoming telemetry packet");
+                        counter!("crsf.tx.crc_err").increment(1);
+                        continue;
+                    }
 
-            if let Err(e) = writer.write_all(&frame).await {
-                error!("Serial write error: {}", e);
-                break;
+                    if let Err(e) = writer.write_all(&frame).await {
+                        error!("Serial write error: {}", e);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    error!("Telemetry subscriber error: {}", e);
+                    break;
+                }
             }
         }
     });
 
-    // Task 2: Serial -> UDP (Input)
-    // Needs framing logic.
+    // Task: Serial -> Zenoh (RC channels)
     let mut reader_handle = tokio::spawn(async move {
         let mut buf = Vec::new(); // Buffer for incoming data
         let mut tmp = [0u8; 1024];
@@ -211,8 +196,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 // Valid packet
                                 trace!("rx: {:02x?}", payload);
                                 counter!("crsf.rx.valid").increment(1);
-                                if let Err(e) = sock.send(frame).await {
-                                    warn!("UDP send error: {}", e);
+                                if let Err(e) = rc_publisher.put(frame).await {
+                                    warn!("Zenoh publish error: {}", e);
                                 }
                             } else {
                                 trace!("CRC mismatch");
@@ -240,5 +225,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ = &mut reader_handle => error!("Reader task finished"),
     }
 
+    session.close().await?;
     Ok(())
 }

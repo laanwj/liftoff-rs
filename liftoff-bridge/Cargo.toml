@@ -1,5 +1,5 @@
 [package]
-name = "liftoff-router"
+name = "liftoff-bridge"
 version = "0.1.0"
 edition = "2024"
 
@@ -11,3 +11,4 @@ env_logger = { workspace = true }
 liftoff-lib = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
+zenoh = { workspace = true }

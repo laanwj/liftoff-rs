@@ -1,15 +1,16 @@
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use liftoff_lib::telemetry::{self};
-use liftoff_lib::{geo, router_protocol};
+use liftoff_lib::{geo, topics};
 use log::{debug, info, warn};
 use metrics::{Unit, counter, describe_counter};
 use metrics_exporter_tcp::TcpBuilder;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, UdpSocket};
+use tokio::net::TcpListener;
 use tokio::time::{Duration, interval};
+use zenoh::Config;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -18,13 +19,21 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1:2947")]
     gpsd_bind: std::net::SocketAddr,
 
-    /// Address of telemetry router.
-    #[arg(long, default_value = "127.0.0.1:9003")]
-    telemetry_addr: std::net::SocketAddr,
-
     /// GPS position update frequency.
     #[arg(short, long, default_value_t = 10)]
     frequency: u64,
+
+    /// Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery.
+    #[arg(long)]
+    zenoh_connect: Option<String>,
+
+    /// Zenoh mode (peer or client).
+    #[arg(long, default_value = "peer")]
+    zenoh_mode: String,
+
+    /// Zenoh topic prefix.
+    #[arg(long, default_value = topics::DEFAULT_PREFIX)]
+    zenoh_prefix: String,
 
     /// Enable metrics reporting using metrics-rs-tcp-exporter.
     #[arg(long, default_value_t = false)]
@@ -109,7 +118,7 @@ fn generate_rmc_nofix(time: DateTime<Utc>) -> String {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let args = Args::parse();
 
@@ -130,35 +139,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     describe_counter!("gpsd.client.accept", Unit::Count, "Clients accepted");
     describe_counter!("gpsd.nmea.tx", Unit::Count, "NMEA sentences sent");
 
-    // Telemetry Receiver logic
-    let sock_tel = UdpSocket::bind("0.0.0.0:0").await?;
-    info!("Connecting telemetry to {}", args.telemetry_addr);
-    sock_tel.connect(&args.telemetry_addr).await?;
+    // Zenoh session
+    let mut config = Config::default();
+    config.insert_json5("mode", &format!(r#""{}""#, args.zenoh_mode))?;
+    if let Some(ref endpoint) = args.zenoh_connect {
+        config.insert_json5("connect/endpoints", &format!(r#"["{}"]"#, endpoint))?;
+    }
 
-    // Connect to telemetry socket (or send keepalive to router)
-    let sock_tel = Arc::new(sock_tel);
-    let sock_tel_rx = sock_tel.clone();
+    let session = zenoh::open(config).await?;
+    let tel_topic = topics::topic(&args.zenoh_prefix, topics::TELEMETRY);
+    info!("Subscribing to: {}", tel_topic);
+    let tel_subscriber = session.declare_subscriber(&tel_topic).await?;
 
     // Shared state for latest telemetry
     let shared_state = Arc::new(std::sync::RwLock::new(None));
     let tx = shared_state.clone();
     let rx = shared_state.clone();
 
-    // Keepalive
-    tokio::spawn(async move {
-        let mut interval = interval(router_protocol::KEEPALIVE_INTERVAL);
-        loop {
-            interval.tick().await;
-            if let Err(e) = sock_tel
-                .send(&[router_protocol::Opcode::Register as u8])
-                .await
-            {
-                warn!("Failed to send keepalive: {}", e);
-            }
-        }
-    });
-
-    // Telemetry Reader
+    // Telemetry format config
     let config_format = vec![
         "Timestamp".to_string(),
         "Position".to_string(),
@@ -170,20 +168,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "MotorRPM".to_string(),
     ];
 
+    // Telemetry reader task
     tokio::spawn(async move {
-        let mut buf = [0u8; 4096];
         loop {
-            match sock_tel_rx.recv(&mut buf).await {
-                Ok(len) => {
+            match tel_subscriber.recv_async().await {
+                Ok(sample) => {
+                    let payload = sample.payload().to_bytes();
                     counter!("gpsd.telemetry.rx").increment(1);
-                    if let Ok(packet) = telemetry::parse_packet(&buf[0..len], &config_format) {
+                    if let Ok(packet) = telemetry::parse_packet(&payload, &config_format) {
                         if let Ok(mut lock) = tx.write() {
-                            // Store packet with timestamp
                             *lock = Some((std::time::Instant::now(), packet));
                         }
                     }
                 }
-                Err(e) => warn!("Telemetry error: {}", e),
+                Err(e) => {
+                    warn!("Telemetry subscriber error: {}", e);
+                    break;
+                }
             }
         }
     });

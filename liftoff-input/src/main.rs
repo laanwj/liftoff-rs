@@ -3,27 +3,30 @@ use evdev::uinput::VirtualDevice;
 use evdev::{AbsoluteAxisCode, AttributeSet, InputId, KeyCode, MiscCode, UinputAbsSetup};
 use liftoff_lib::crsf::{self, CrsfPacket};
 use liftoff_lib::crsf_tx;
-use liftoff_lib::router_protocol;
 use liftoff_lib::telemetry::{self};
+use liftoff_lib::topics;
 use log::{error, info, trace, warn};
 use metrics::{Unit, counter, describe_counter};
 use metrics_exporter_tcp::TcpBuilder;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
-use tokio::time::interval;
+use zenoh::Config;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Bind address for incoming CRSF UDP packets.
-    #[arg(long, default_value = "127.0.0.1:9005")]
-    bind: std::net::SocketAddr,
+    /// Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery.
+    #[arg(long)]
+    zenoh_connect: Option<String>,
 
-    /// Address of telemetry router.
-    #[arg(long, default_value = "127.0.0.1:9003")]
-    telemetry_addr: std::net::SocketAddr,
+    /// Zenoh mode (peer or client).
+    #[arg(long, default_value = "peer")]
+    zenoh_mode: String,
+
+    /// Zenoh topic prefix.
+    #[arg(long, default_value = topics::DEFAULT_PREFIX)]
+    zenoh_prefix: String,
 
     /// Enable metrics reporting using metrics-rs-tcp-exporter.
     #[arg(long, default_value_t = false)]
@@ -300,11 +303,11 @@ impl InputState {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let args = Args::parse();
 
-    info!("Starting liftoff-input on {}", args.bind);
+    info!("Starting liftoff-input");
 
     if args.metrics_tcp {
         let builder = TcpBuilder::new().listen_address(args.metrics_tcp_bind);
@@ -335,40 +338,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Updates to virtual input device"
     );
 
-    let sock_crsf = Arc::new(UdpSocket::bind(&args.bind).await?);
-    let sock_tel = UdpSocket::bind("0.0.0.0:0").await?; // Bind to random port for telemetry return
+    // Zenoh session
+    let mut config = Config::default();
+    config.insert_json5("mode", &format!(r#""{}""#, args.zenoh_mode))?;
+    if let Some(ref endpoint) = args.zenoh_connect {
+        config.insert_json5("connect/endpoints", &format!(r#"["{}"]"#, endpoint))?;
+    }
 
-    // Connect telemetry socket to Liftoff/Router
-    info!("Connecting telemetry to {}", args.telemetry_addr);
-    sock_tel.connect(&args.telemetry_addr).await?;
+    let session = zenoh::open(config).await?;
+
+    let tel_topic = topics::topic(&args.zenoh_prefix, topics::TELEMETRY);
+    let crsf_tel_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_TELEMETRY);
+    let crsf_rc_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC);
+
+    info!("Subscribing to: {}", tel_topic);
+    info!("Publishing on: {}", crsf_tel_topic);
+    info!("Subscribing to: {}", crsf_rc_topic);
+
+    let crsf_tel_publisher = session.declare_publisher(crsf_tel_topic).await?;
+    let tel_subscriber = session.declare_subscriber(&tel_topic).await?;
+    let rc_subscriber = session.declare_subscriber(&crsf_rc_topic).await?;
 
     // Create uinput device
     // NOTE: This requires permission to write to /dev/uinput
     let input_state = Arc::new(Mutex::new(InputState::new()?));
 
-    let sock_crsf_clone = sock_crsf.clone();
-    let target_addr = Arc::new(Mutex::new(None));
-    let target_addr_clone = target_addr.clone();
-
-    // Task: Telemetry Keepalive and Forwarding
-    let sock_tel = Arc::new(sock_tel);
-    let sock_tel_rx = sock_tel.clone();
-
-    // Keepalive
-    tokio::spawn(async move {
-        let mut interval = interval(router_protocol::KEEPALIVE_INTERVAL);
-        loop {
-            interval.tick().await;
-            if let Err(e) = sock_tel
-                .send(&[router_protocol::Opcode::Register as u8])
-                .await
-            {
-                warn!("Failed to send keepalive: {}", e);
-            }
-        }
-    });
-
-    // Telemetry Receive & Forward
+    // Telemetry format config
     // We assume default configuration for now
     let config_format = vec![
         "Timestamp".to_string(),
@@ -381,69 +376,72 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "MotorRPM".to_string(),
     ];
 
+    // Task: Receive raw telemetry from bridge, convert to CRSF, publish
+    let crsf_tel_pub = crsf_tel_publisher;
     tokio::spawn(async move {
-        let mut buf = [0u8; 4096];
         let mut next_send = tokio::time::Instant::now();
         loop {
-            match sock_tel_rx.recv(&mut buf).await {
-                Ok(len) => {
-                    trace!("rx tel {:02x?}", &buf[0..len]);
+            match tel_subscriber.recv_async().await {
+                Ok(sample) => {
+                    let payload = sample.payload().to_bytes();
+                    trace!("rx tel {} bytes", payload.len());
                     counter!("input.telemetry.rx").increment(1);
                     let now = tokio::time::Instant::now();
                     if now >= next_send {
-                        if let Ok(packet) = telemetry::parse_packet(&buf[0..len], &config_format) {
-                            // Generate CRSF packets
+                        if let Ok(packet) =
+                            telemetry::parse_packet(&payload, &config_format)
+                        {
                             let crsf_packets = crsf_tx::generate_crsf_telemetry(&packet);
-                            let target = *target_addr_clone.lock().await;
-                            if let Some(addr) = target {
-                                for pkt in crsf_packets {
-                                    trace!("tx tel {:02x?}", &pkt);
-                                    if let Err(e) = sock_crsf_clone.send_to(&pkt, addr).await {
-                                        warn!("Failed to forward CRSF telem: {}", e);
-                                    } else {
-                                        counter!("input.telemetry.tx").increment(1);
-                                    }
+                            for pkt in crsf_packets {
+                                trace!("tx crsf tel {} bytes", pkt.len());
+                                if let Err(e) = crsf_tel_pub.put(pkt.as_slice()).await {
+                                    warn!("Failed to publish CRSF telem: {}", e);
+                                } else {
+                                    counter!("input.telemetry.tx").increment(1);
                                 }
                             }
                             next_send = now + TELEMETRY_INTERVAL;
                         }
                     }
                 }
-                Err(e) => warn!("Telemetry recv error: {}", e),
+                Err(e) => {
+                    warn!("Telemetry subscriber error: {}", e);
+                    break;
+                }
             }
         }
     });
 
-    // Main loop: Receive CRSF RC channels
-    let mut buf = [0u8; 64];
+    // Main loop: Receive CRSF RC channels from Zenoh
     loop {
-        let (len, addr) = sock_crsf.recv_from(&mut buf).await?;
+        match rc_subscriber.recv_async().await {
+            Ok(sample) => {
+                let payload = sample.payload().to_bytes();
+                trace!("rx crsf {:02x?}", &*payload);
+                counter!("input.crsf.rx").increment(1);
 
-        // Update target address for return telemetry
-        let mut t = target_addr.lock().await;
-        if *t != Some(addr) {
-            info!("New client connected: {}", addr);
-            *t = Some(addr);
-        }
-        drop(t);
+                if let Some(CrsfPacket::RcChannelsPacked(channels)) =
+                    crsf::parse_packet_check(&payload)
+                {
+                    counter!("input.crsf.rx_rc_channels").increment(1);
+                    if channels.channels.iter().any(|&c| c > AXIS_MAX) {
+                        warn!("Channel out of range: {:?}", channels.channels);
+                        continue;
+                    }
 
-        trace!("rx crsf {:02x?}", &buf[0..len]);
-        counter!("input.crsf.rx").increment(1);
-
-        // Check, parse packet and check type.
-        if let Some(CrsfPacket::RcChannelsPacked(channels)) = crsf::parse_packet_check(&buf[0..len])
-        {
-            counter!("input.crsf.rx_rc_channels").increment(1);
-            // Check range
-            if channels.channels.iter().any(|&c| c > AXIS_MAX) {
-                warn!("Channel out of range: {:?}", channels.channels);
-                continue;
+                    let mut state = input_state.lock().await;
+                    if let Err(e) = state.update(channels.channels) {
+                        error!("Failed to update uinput: {}", e);
+                    }
+                }
             }
-
-            let mut state = input_state.lock().await;
-            if let Err(e) = state.update(channels.channels) {
-                error!("Failed to update uinput: {}", e);
+            Err(e) => {
+                error!("RC subscriber error: {}", e);
+                break;
             }
         }
     }
+
+    session.close().await?;
+    Ok(())
 }

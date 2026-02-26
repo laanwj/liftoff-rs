@@ -12,3 +12,4 @@ log = { workspace = true }
 tokio = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-tcp = { workspace = true }
+zenoh = { workspace = true }
