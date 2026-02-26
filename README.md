@@ -1,6 +1,6 @@
 # liftoff-rs
 
-Tools and background services for CRSF joystick and telemetry, to use the quadcopter sim "liftoff" in hardware-in-the-loop simulation:
+Tools and background services for CRSF joystick, telemetry, and autopilot, to use the quadcopter sim "liftoff" in hardware-in-the-loop simulation. Services communicate over [Zenoh](https://zenoh.io/) pub/sub over UDP.
 
 ```
  ┏━━━━━━━┓
@@ -19,16 +19,17 @@ Tools and background services for CRSF joystick and telemetry, to use the quadco
                                    │ router ◀─────◀ liftoff ║
                                    └────▼───┘ UDP ║   sim   ║
                                     UDP │     tlm ╚═════════╝
-                                    tlm │         
+                                    tlm │
  ─ this repository                  ┌───▼──┐       ╔══════╗
  ═ external software                │ gpsd ▶───────▶ QGIS ║
  ━ hardware                         └──────┘       ╚══════╝
 ```
-                                                             
-- `liftoff-forward`: CRSF forwarder. Forward CRSF control and telemetry between a ELRS receiver UDP sockets
+
+- `liftoff-bridge`: Simulator bridge. Receives liftoff's native UDP telemetry and publishes it to Zenoh
+- `liftoff-forward`: CRSF forwarder. Bridges CRSF RC channels and telemetry between an ELRS serial receiver and Zenoh
+- `liftoff-input`: CRSF joystick + mux. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick. Also converts sim telemetry to CRSF telemetry for the radio
+- `liftoff-autopilot`: PID autopilot with waypoint navigation. Subscribes to CRSF telemetry, publishes RC channels to `crsf/rc/autopilot`
 - `liftoff-gpsd`: gpsd emulator for viewing liftoff telemetry in QGIS
-- `liftoff-router`: Telemetry router. Receives liftoff's native UDP telemetry and broadcasts it to subscribers
-- `liftoff-input`: CRSF joystick. Receives CRSF packets over UDP and simulates a linux udev joystick. Sends back telemetry from liftoff to UDP
 
 This project makes use of `tokio` for reliable, high-performance asynchronous I/O.
 
@@ -88,40 +89,23 @@ cargo test --release
 
 ### Running
 
-Below are the command-line help for the all the services. All services are optional. For example, if you don't use `gpsd`, there is no need to run it.
+Below are the command-line help for all the services. All services are optional. For example, if you don't use `gpsd`, there is no need to run it.
+
+All services share the common Zenoh options `--zenoh-connect`, `--zenoh-mode`, and `--zenoh-prefix`. By default they use peer discovery on prefix `liftoff`. To connect to a specific Zenoh router, use `--zenoh-connect tcp/host:7447`.
 
 ```
-$ target/release/liftoff-forward --help
-Usage: liftoff-forward [OPTIONS]
+$ target/release/liftoff-bridge --help
+Usage: liftoff-bridge [OPTIONS]
 
 Options:
-  -p, --port <PORT>
-          Serial port to use [default: /dev/ttyUSB0]
-  -b, --baud <BAUD>
-          Serial baudrate to use [default: 420000]
-      --dest <DEST>
-          Destination for UDP packets [default: 127.0.0.1:9005]
-      --src <SRC>
-          Source (bind) for UDP packets [default: 127.0.0.1:9006]
-      --metrics-tcp
-          Enable metrics reporting using metrics-rs-tcp-exporter
-      --metrics-tcp-bind <METRICS_TCP_BIND>
-          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5000]
-  -h, --help
-          Print help
-  -V, --version
-          Print version
-```
-
-```
-$ target/release/liftoff-router --help
-Usage: liftoff-router [OPTIONS]
-
-Options:
-      --cmd-bind <CMD_BIND>
-          Bind address for telemetry router [default: 127.0.0.1:9003]
-      --tel-bind <TEL_BIND>
-          Bind address for incoming telemetry [default: 127.0.0.1:9001]
+      --sim-bind <SIM_BIND>
+          Bind address for simulator telemetry UDP [default: 127.0.0.1:9001]
+      --zenoh-connect <ZENOH_CONNECT>
+          Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
+      --zenoh-mode <ZENOH_MODE>
+          Zenoh mode (peer or client) [default: peer]
+      --zenoh-prefix <ZENOH_PREFIX>
+          Zenoh topic prefix [default: liftoff]
       --metrics-tcp
           Enable metrics reporting using metrics-rs-tcp-exporter
       --metrics-tcp-bind <METRICS_TCP_BIND>
@@ -133,19 +117,24 @@ Options:
 ```
 
 ```
-Usage: liftoff-gpsd [OPTIONS]
+$ target/release/liftoff-forward --help
+Usage: liftoff-forward [OPTIONS]
 
 Options:
-      --gpsd-bind <GPSD_BIND>
-          Bind address for GPSD service [default: 127.0.0.1:2947]
-      --telemetry-addr <TELEMETRY_ADDR>
-          Address of telemetry router [default: 127.0.0.1:9003]
-  -f, --frequency <FREQUENCY>
-          GPS position update frequency [default: 10]
+  -p, --port <PORT>
+          Serial port to use [default: /dev/ttyUSB0]
+  -b, --baud <BAUD>
+          Serial baudrate to use [default: 420000]
+      --zenoh-connect <ZENOH_CONNECT>
+          Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
+      --zenoh-mode <ZENOH_MODE>
+          Zenoh mode (peer or client) [default: peer]
+      --zenoh-prefix <ZENOH_PREFIX>
+          Zenoh topic prefix [default: liftoff]
       --metrics-tcp
           Enable metrics reporting using metrics-rs-tcp-exporter
       --metrics-tcp-bind <METRICS_TCP_BIND>
-          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5003]
+          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5000]
   -h, --help
           Print help
   -V, --version
@@ -157,10 +146,12 @@ $ target/release/liftoff-input --help
 Usage: liftoff-input [OPTIONS]
 
 Options:
-      --bind <BIND>
-          Bind address for incoming CRSF UDP packets [default: 127.0.0.1:9005]
-      --telemetry-addr <TELEMETRY_ADDR>
-          Address of telemetry router [default: 127.0.0.1:9003]
+      --zenoh-connect <ZENOH_CONNECT>
+          Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
+      --zenoh-mode <ZENOH_MODE>
+          Zenoh mode (peer or client) [default: peer]
+      --zenoh-prefix <ZENOH_PREFIX>
+          Zenoh topic prefix [default: liftoff]
       --metrics-tcp
           Enable metrics reporting using metrics-rs-tcp-exporter
       --metrics-tcp-bind <METRICS_TCP_BIND>
@@ -170,6 +161,62 @@ Options:
   -V, --version
           Print version
 ```
+
+```
+$ target/release/liftoff-autopilot --help
+Usage: liftoff-autopilot [OPTIONS]
+
+Options:
+      --target-alt <TARGET_ALT>
+          Target Altitude (meters) [default: 10]
+      --waypoints <WAYPOINTS>
+          Path to waypoints JSON file
+      --zenoh-connect <ZENOH_CONNECT>
+          Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
+      --zenoh-mode <ZENOH_MODE>
+          Zenoh mode (peer or client) [default: peer]
+      --zenoh-prefix <ZENOH_PREFIX>
+          Zenoh topic prefix [default: liftoff]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
+```
+
+```
+$ target/release/liftoff-gpsd --help
+Usage: liftoff-gpsd [OPTIONS]
+
+Options:
+      --gpsd-bind <GPSD_BIND>
+          Bind address for GPSD service [default: 127.0.0.1:2947]
+  -f, --frequency <FREQUENCY>
+          GPS position update frequency [default: 10]
+      --zenoh-connect <ZENOH_CONNECT>
+          Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
+      --zenoh-mode <ZENOH_MODE>
+          Zenoh mode (peer or client) [default: peer]
+      --zenoh-prefix <ZENOH_PREFIX>
+          Zenoh topic prefix [default: liftoff]
+      --metrics-tcp
+          Enable metrics reporting using metrics-rs-tcp-exporter
+      --metrics-tcp-bind <METRICS_TCP_BIND>
+          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5003]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
+```
+
+### RC/Autopilot Mux
+
+When both `liftoff-forward` (manual RC) and `liftoff-autopilot` are running, `liftoff-input` acts as a mux:
+
+- **No radio connected** (no manual frame within 500ms): autopilot controls
+- **Radio connected, ch8 high**: autopilot controls
+- **Radio connected, ch8 low**: manual override
+
+This allows seamless handoff between manual and autonomous flight using the SA switch on the radio.
 
 ### Setting up liftoff's input
 
