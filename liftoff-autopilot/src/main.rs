@@ -416,7 +416,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let session = zenoh::open(config).await?;
 
     let crsf_tel_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_TELEMETRY);
-    let crsf_rc_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC);
+    let crsf_rc_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC_AUTOPILOT);
 
     info!("Subscribing to: {}", crsf_tel_topic);
     info!("Publishing on: {}", crsf_rc_topic);

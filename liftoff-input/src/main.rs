@@ -350,14 +350,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tel_topic = topics::topic(&args.zenoh_prefix, topics::TELEMETRY);
     let crsf_tel_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_TELEMETRY);
     let crsf_rc_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC);
+    let crsf_rc_ap_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC_AUTOPILOT);
 
     info!("Subscribing to: {}", tel_topic);
     info!("Publishing on: {}", crsf_tel_topic);
-    info!("Subscribing to: {}", crsf_rc_topic);
+    info!("Subscribing to: {} (manual)", crsf_rc_topic);
+    info!("Subscribing to: {} (autopilot)", crsf_rc_ap_topic);
 
     let crsf_tel_publisher = session.declare_publisher(crsf_tel_topic).await?;
     let tel_subscriber = session.declare_subscriber(&tel_topic).await?;
     let rc_subscriber = session.declare_subscriber(&crsf_rc_topic).await?;
+    let rc_ap_subscriber = session.declare_subscriber(&crsf_rc_ap_topic).await?;
 
     // Create uinput device
     // NOTE: This requires permission to write to /dev/uinput
@@ -412,32 +415,74 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
-    // Main loop: Receive CRSF RC channels from Zenoh
+    // Mux state: track manual radio presence and SA switch position
+    let manual_timeout = Duration::from_millis(500);
+    let mut last_manual_time: Option<tokio::time::Instant> = None;
+    let mut last_manual_ch7: u16 = 0; // SA switch, low = manual
+    let mut active_source = "none";
+
+    // Main loop: Mux between manual (crsf/rc) and autopilot (crsf/rc/autopilot) frames
     loop {
-        match rc_subscriber.recv_async().await {
-            Ok(sample) => {
-                let payload = sample.payload().to_bytes();
-                trace!("rx crsf {:02x?}", &*payload);
-                counter!("input.crsf.rx").increment(1);
-
-                if let Some(CrsfPacket::RcChannelsPacked(channels)) =
-                    crsf::parse_packet_check(&payload)
-                {
-                    counter!("input.crsf.rx_rc_channels").increment(1);
-                    if channels.channels.iter().any(|&c| c > AXIS_MAX) {
-                        warn!("Channel out of range: {:?}", channels.channels);
-                        continue;
-                    }
-
-                    let mut state = input_state.lock().await;
-                    if let Err(e) = state.update(channels.channels) {
-                        error!("Failed to update uinput: {}", e);
+        let (payload, source) = tokio::select! {
+            result = rc_subscriber.recv_async() => {
+                match result {
+                    Ok(sample) => (sample.payload().to_bytes().to_vec(), "manual"),
+                    Err(e) => {
+                        error!("RC subscriber error: {}", e);
+                        break;
                     }
                 }
             }
-            Err(e) => {
-                error!("RC subscriber error: {}", e);
-                break;
+            result = rc_ap_subscriber.recv_async() => {
+                match result {
+                    Ok(sample) => (sample.payload().to_bytes().to_vec(), "autopilot"),
+                    Err(e) => {
+                        error!("RC autopilot subscriber error: {}", e);
+                        break;
+                    }
+                }
+            }
+        };
+
+        trace!("rx crsf ({}) {:02x?}", source, &*payload);
+        counter!("input.crsf.rx").increment(1);
+
+        if let Some(CrsfPacket::RcChannelsPacked(channels)) =
+            crsf::parse_packet_check(&payload)
+        {
+            counter!("input.crsf.rx_rc_channels").increment(1);
+            if channels.channels.iter().any(|&c| c > AXIS_MAX) {
+                warn!("Channel out of range: {:?}", channels.channels);
+                continue;
+            }
+
+            // Update manual tracking state
+            if source == "manual" {
+                last_manual_time = Some(tokio::time::Instant::now());
+                last_manual_ch7 = channels.channels[7];
+            }
+
+            // Determine selected source from mux state
+            let manual_active = last_manual_time
+                .map(|t| t.elapsed() < manual_timeout)
+                .unwrap_or(false);
+            let selected = if manual_active && last_manual_ch7 < AXIS_MID {
+                "manual"
+            } else {
+                "autopilot"
+            };
+
+            if active_source != selected {
+                info!("RC source switched to {}", selected);
+                active_source = selected;
+            }
+
+            // Apply frame if it matches the selected source
+            if source == selected {
+                let mut state = input_state.lock().await;
+                if let Err(e) = state.update(channels.channels) {
+                    error!("Failed to update uinput: {}", e);
+                }
             }
         }
     }

@@ -2,6 +2,7 @@ pub const DEFAULT_PREFIX: &str = "liftoff";
 pub const TELEMETRY: &str = "telemetry";
 pub const CRSF_TELEMETRY: &str = "crsf/telemetry";
 pub const CRSF_RC: &str = "crsf/rc";
+pub const CRSF_RC_AUTOPILOT: &str = "crsf/rc/autopilot";
 
 pub fn topic(prefix: &str, suffix: &str) -> String {
     format!("{}/{}", prefix, suffix)
