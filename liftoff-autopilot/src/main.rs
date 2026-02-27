@@ -1,3 +1,5 @@
+mod mavlink_interface;
+
 use clap::Parser;
 use liftoff_lib::crsf::{self, CrsfPacket};
 use liftoff_lib::geo;
@@ -108,6 +110,10 @@ struct Args {
     /// Zenoh topic prefix.
     #[arg(long, default_value = topics::DEFAULT_PREFIX)]
     zenoh_prefix: String,
+
+    /// MAVLink UDP bind address (e.g. 0.0.0.0:14550). Enables MAVLink interface when set.
+    #[arg(long)]
+    mavlink_bind: Option<String>,
 }
 
 // PID Controller
@@ -191,6 +197,10 @@ struct DroneState {
     alt_origin: f64,
     prev_position: Option<Vector3<f64>>,
     prev_pos_time: Option<Instant>,
+    // Raw GPS passthrough for MAVLink telemetry
+    gps_lat: f64,
+    gps_lon: f64,
+    gps_alt: f64,
 }
 
 impl Default for DroneState {
@@ -204,6 +214,9 @@ impl Default for DroneState {
             alt_origin: 0.0,
             prev_position: None,
             prev_pos_time: None,
+            gps_lat: 0.0,
+            gps_lon: 0.0,
+            gps_alt: 0.0,
         }
     }
 }
@@ -453,6 +466,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     debug!("RX GPS: lat={:.6} lon={:.6} alt={:.2} speed={:.1}km/h heading={:.1}deg",
                                         lat, lon, alt, gps.speed_kmh(), gps.heading_deg());
 
+                                    // Store raw GPS for MAVLink telemetry
+                                    s.gps_lat = lat;
+                                    s.gps_lon = lon;
+                                    s.gps_alt = alt;
+
                                     if s.gps_origin.is_none() {
                                         info!("GPS Origin Set: {}, {} alt={}", lat, lon, alt);
                                         s.gps_origin = Some((lat, lon));
@@ -513,6 +531,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     });
+
+    // Start MAVLink interface if enabled
+    let mavlink_enabled = args.mavlink_bind.is_some();
+    let (mut cmd_rx, mav_state) = if let Some(ref bind) = args.mavlink_bind {
+        let state_for_mav = state.clone();
+        let telem_source: Arc<Mutex<dyn Fn() -> mavlink_interface::TelemetrySnapshot + Send>> =
+            Arc::new(Mutex::new(move || {
+                // We can't .await inside a closure, so use try_lock
+                let s = state_for_mav.try_lock();
+                match s {
+                    Ok(s) => {
+                        let (vel_n, vel_e, vel_d) = if let Some(v) = s.velocity {
+                            (v[2], v[0], -v[1]) // [E,Up,N] -> [N,E,Down]
+                        } else {
+                            (0.0, 0.0, 0.0)
+                        };
+                        mavlink_interface::TelemetrySnapshot {
+                            gps_lat: s.gps_lat,
+                            gps_lon: s.gps_lon,
+                            gps_alt: s.gps_alt,
+                            alt_origin: s.alt_origin,
+                            vel_n,
+                            vel_e,
+                            vel_d,
+                            yaw: s.yaw,
+                            has_gps: s.gps_origin.is_some(),
+                        }
+                    }
+                    Err(_) => mavlink_interface::TelemetrySnapshot {
+                        gps_lat: 0.0,
+                        gps_lon: 0.0,
+                        gps_alt: 0.0,
+                        alt_origin: 0.0,
+                        vel_n: 0.0,
+                        vel_e: 0.0,
+                        vel_d: 0.0,
+                        yaw: 0.0,
+                        has_gps: false,
+                    },
+                }
+            }));
+        let (rx, ms) = mavlink_interface::start(bind, telem_source).await?;
+        (Some(rx), Some(ms))
+    } else {
+        (None, None)
+    };
 
     // Control Loop
     let mut controller = Controller::new(args.target_alt);
@@ -582,12 +646,123 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         let drone_state = state.lock().await.clone();
 
-        // Arming logic
-        if !armed && start_time.elapsed().as_secs() > 2 {
+        // Process MAVLink commands if enabled
+        if let Some(ref mut rx) = cmd_rx {
+            while let Ok(cmd) = rx.try_recv() {
+                match cmd {
+                    mavlink_interface::AutopilotCommand::Arm => {
+                        if !armed {
+                            controller.target_yaw = drone_state.yaw;
+                            info!("MAVLink ARM: target_yaw={:.3}", controller.target_yaw);
+                            armed = true;
+                            controller.armed = true;
+                            if let Some(ref ms) = mav_state {
+                                let mut s = ms.lock().await;
+                                s.armed = true;
+                                s.flight_mode = mavlink_interface::FlightMode::OnGround;
+                            }
+                        }
+                    }
+                    mavlink_interface::AutopilotCommand::Disarm => {
+                        if armed {
+                            info!("MAVLink DISARM");
+                            armed = false;
+                            controller.armed = false;
+                            controller.alt_pid.reset();
+                            controller.pos_x_pid.reset();
+                            controller.pos_y_pid.reset();
+                            controller.yaw_pid.reset();
+                            if let Some(ref ms) = mav_state {
+                                let mut s = ms.lock().await;
+                                s.armed = false;
+                                s.flight_mode = mavlink_interface::FlightMode::OnGround;
+                            }
+                        }
+                    }
+                    mavlink_interface::AutopilotCommand::Takeoff { alt } => {
+                        if armed {
+                            info!("MAVLink TAKEOFF to {:.1}m", alt);
+                            controller.target_pos[0] = drone_state.position.map_or(0.0, |p| p[0]);
+                            controller.target_pos[1] = alt as f64;
+                            controller.target_pos[2] = drone_state.position.map_or(0.0, |p| p[2]);
+                            controller.route_complete = true; // Stop waypoint navigation
+                            controller.pos_x_pid.reset();
+                            controller.pos_y_pid.reset();
+                            controller.alt_pid.reset();
+                            if let Some(ref ms) = mav_state {
+                                ms.lock().await.flight_mode = mavlink_interface::FlightMode::Takeoff;
+                            }
+                        }
+                    }
+                    mavlink_interface::AutopilotCommand::Land => {
+                        if armed {
+                            info!("MAVLink LAND");
+                            controller.target_pos[1] = 0.0;
+                            controller.route_complete = true;
+                            controller.alt_pid.reset();
+                            if let Some(ref ms) = mav_state {
+                                ms.lock().await.flight_mode = mavlink_interface::FlightMode::Landing;
+                            }
+                        }
+                    }
+                    mavlink_interface::AutopilotCommand::Goto { lat, lon, alt_msl, yaw } => {
+                        if armed {
+                            if let Some(origin) = drone_state.gps_origin {
+                                let local = geo::coord_from_gps(
+                                    (lon, lat, alt_msl as f64),
+                                    (origin.1, origin.0),
+                                );
+                                let relative_alt = alt_msl as f64 - drone_state.alt_origin;
+                                info!(
+                                    "MAVLink GOTO: lat={:.6} lon={:.6} alt_msl={:.1} -> local E={:.1} Alt={:.1} N={:.1}",
+                                    lat, lon, alt_msl, local[0], relative_alt, local[2]
+                                );
+                                controller.target_pos = Vector3::new(local[0], relative_alt, local[2]);
+                                if yaw.is_finite() && !yaw.is_nan() {
+                                    controller.target_yaw = yaw as f64;
+                                }
+                                controller.route_complete = true;
+                                controller.pos_x_pid.reset();
+                                controller.pos_y_pid.reset();
+                                controller.alt_pid.reset();
+                            } else {
+                                warn!("MAVLink GOTO: no GPS origin yet, ignoring");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Arming logic (auto-arm only when MAVLink is not enabled)
+        if !mavlink_enabled && !armed && start_time.elapsed().as_secs() > 2 {
             controller.target_yaw = drone_state.yaw;
             info!("Arming! target_yaw={:.3}", controller.target_yaw);
             armed = true;
             controller.armed = true;
+        }
+
+        // Flight mode tracking (MAVLink mode)
+        if mavlink_enabled && armed {
+            if let Some(ref ms) = mav_state {
+                let current_alt = drone_state.position.map_or(0.0, |p| p[1]);
+                let mut s = ms.lock().await;
+                match s.flight_mode {
+                    mavlink_interface::FlightMode::Takeoff if current_alt > 1.0 => {
+                        info!("Flight mode: Takeoff -> InAir (alt={:.1})", current_alt);
+                        s.flight_mode = mavlink_interface::FlightMode::InAir;
+                    }
+                    mavlink_interface::FlightMode::Landing if current_alt < 0.5 => {
+                        info!("Flight mode: Landing -> OnGround, auto-disarm");
+                        s.flight_mode = mavlink_interface::FlightMode::OnGround;
+                        s.armed = false;
+                        drop(s);
+                        armed = false;
+                        controller.armed = false;
+                    }
+                    _ => {}
+                }
+            }
         }
 
         // Waypoint navigation logic
