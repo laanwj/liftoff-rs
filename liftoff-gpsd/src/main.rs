@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use liftoff_lib::telemetry::{self};
-use liftoff_lib::{geo, topics};
+use liftoff_lib::crsf::{self, CrsfPacket};
+use liftoff_lib::topics;
 use log::{debug, info, warn};
 use metrics::{Unit, counter, describe_counter};
 use metrics_exporter_tcp::TcpBuilder;
@@ -147,42 +147,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let session = zenoh::open(config).await?;
-    let tel_topic = topics::topic(&args.zenoh_prefix, topics::TELEMETRY);
-    info!("Subscribing to: {}", tel_topic);
-    let tel_subscriber = session.declare_subscriber(&tel_topic).await?;
+    let crsf_tel_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_TELEMETRY);
+    info!("Subscribing to: {}", crsf_tel_topic);
+    let crsf_tel_subscriber = session.declare_subscriber(&crsf_tel_topic).await?;
 
-    // Shared state for latest telemetry
-    let shared_state = Arc::new(std::sync::RwLock::new(None));
+    // Shared state for latest GPS from CRSF telemetry
+    let shared_state: Arc<std::sync::RwLock<Option<(std::time::Instant, crsf::Gps)>>> =
+        Arc::new(std::sync::RwLock::new(None));
     let tx = shared_state.clone();
     let rx = shared_state.clone();
 
-    // Telemetry format config
-    let config_format = vec![
-        "Timestamp".to_string(),
-        "Position".to_string(),
-        "Attitude".to_string(),
-        "Velocity".to_string(),
-        "Gyro".to_string(),
-        "Input".to_string(),
-        "Battery".to_string(),
-        "MotorRPM".to_string(),
-    ];
-
-    // Telemetry reader task
+    // CRSF telemetry reader task — extract GPS packets
     tokio::spawn(async move {
         loop {
-            match tel_subscriber.recv_async().await {
+            match crsf_tel_subscriber.recv_async().await {
                 Ok(sample) => {
                     let payload = sample.payload().to_bytes();
                     counter!("gpsd.telemetry.rx").increment(1);
-                    if let Ok(packet) = telemetry::parse_packet(&payload, &config_format) {
+                    if let Some(CrsfPacket::Gps(gps)) = crsf::parse_packet_check(&payload) {
                         if let Ok(mut lock) = tx.write() {
-                            *lock = Some((std::time::Instant::now(), packet));
+                            *lock = Some((std::time::Instant::now(), gps));
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("Telemetry subscriber error: {}", e);
+                    warn!("CRSF telemetry subscriber error: {}", e);
                     break;
                 }
             }
@@ -243,34 +232,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             let time = Utc::now();
                             let mut sentences = Vec::<String>::new();
                             let mut have_fix = false;
-                            if let Some((recv_time, ref pkt)) = packet_data {
+                            if let Some((recv_time, ref gps)) = packet_data {
                                 if recv_time.elapsed() < Duration::from_secs(10) {
-                                    debug!("in {:?}", pkt);
-                                    if let (Some(pos), Some(att), Some(vel)) =
-                                        (pkt.position, pkt.attitude, pkt.velocity)
-                                    {
-                                        let (lon, lat, alt) = geo::gps_from_coord(
-                                            &[pos[0] as f64, pos[1] as f64, pos[2] as f64],
-                                            (0.0, 0.0),
-                                        );
+                                    debug!("in {:?}", gps);
+                                    let lat = gps.lat_deg();
+                                    let lon = gps.lon_deg();
+                                    let alt = gps.alt_m();
+                                    let knots = gps.speed_kmh() / 1.852;
+                                    let course = gps.heading_deg();
 
-                                        // Speed
-                                        let vel2d = (vel[0].powi(2) + vel[2].powi(2)).sqrt() as f64; // m/s
-                                        let knots = vel2d * 1.94384;
-                                        let course = geo::quat2heading(
-                                            att[0] as f64,
-                                            att[1] as f64,
-                                            att[2] as f64,
-                                            att[3] as f64,
-                                        )
-                                        .to_degrees();
-                                        let course =
-                                            if course < 0.0 { course + 360.0 } else { course };
-
-                                        sentences.push(generate_gga(time, lat, lon, alt, 8));
-                                        sentences.push(generate_rmc(time, lat, lon, knots, course));
-                                        have_fix = true;
-                                    }
+                                    sentences.push(generate_gga(time, lat, lon, alt, gps.sats as u32));
+                                    sentences.push(generate_rmc(time, lat, lon, knots, course));
+                                    have_fix = true;
                                 }
                             }
 

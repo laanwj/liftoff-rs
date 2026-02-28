@@ -19,8 +19,8 @@ Radio TX                                 liftoff-input -> uinput -> Sim
 
 | Topic                       | Direction         | Content                    |
 |-----------------------------|-------------------|----------------------------|
-| `liftoff/telemetry`         | input -> gpsd, autopilot | Raw sim telemetry bytes |
-| `liftoff/crsf/telemetry`   | input -> forward, autopilot | Individual CRSF frames |
+| `liftoff/telemetry`         | input (internal)       | Raw sim telemetry bytes    |
+| `liftoff/crsf/telemetry`   | input -> forward, autopilot, gpsd | Individual CRSF frames |
 | `liftoff/crsf/rc`          | forward/autopilot -> input | CRSF RC channel frames |
 
 ### Components
@@ -30,7 +30,7 @@ Radio TX                                 liftoff-input -> uinput -> Sim
 | `liftoff-input`     | Cloud    | Sim UDP bridge + CRSF joystick (uinput) + RC mux  |
 | `liftoff-forward`   | Local    | Serial port (radio TX) <-> Zenoh                  |
 | `liftoff-autopilot` | Local    | Autonomous flight controller                       |
-| `liftoff-gpsd`      | Either   | NMEA GPS server from telemetry                     |
+| `liftoff-gpsd`      | Either   | NMEA GPS server from CRSF telemetry                |
 
 ## Cloud server setup
 

@@ -28,7 +28,7 @@ Tools and background services for CRSF joystick, telemetry, and autopilot, to us
 - `liftoff-forward`: CRSF forwarder. Bridges CRSF RC channels and telemetry between an ELRS serial receiver and Zenoh
 - `liftoff-input`: Simulator bridge + CRSF joystick + mux. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick. Also converts sim telemetry to CRSF telemetry for the radio
 - `liftoff-autopilot`: PID autopilot with waypoint navigation. Subscribes to CRSF telemetry, publishes RC channels to `crsf/rc/autopilot`
-- `liftoff-gpsd`: gpsd emulator for viewing liftoff telemetry in QGIS
+- `liftoff-gpsd`: gpsd emulator. Subscribes to CRSF telemetry and serves NMEA GPS sentences to clients like QGIS
 
 This project makes use of `tokio` for reliable, high-performance asynchronous I/O.
 
