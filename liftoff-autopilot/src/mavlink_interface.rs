@@ -1,6 +1,6 @@
 use log::{debug, info, warn};
 use mavlink::common::*;
-use mavlink::{MavHeader, MavlinkVersion, Message};
+use mavlink::{MavHeader, Message};
 use mavlink::peek_reader::PeekReader;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, Instant, interval};
+
+const SYSTEM_ID: u8 = 1;
+const COMPONENT_ID: u8 = 1;
 
 // --- Parameter store ---
 
@@ -85,64 +88,39 @@ pub struct TelemetrySnapshot {
 // --- MavSender helper ---
 
 struct MavSender {
-    socket: Arc<UdpSocket>,
-    peer: Arc<Mutex<Option<SocketAddr>>>,
     sequence: AtomicU8,
+    zenoh_pub: zenoh::pubsub::Publisher<'static>,
 }
 
 impl MavSender {
-    fn new(socket: Arc<UdpSocket>, peer: Arc<Mutex<Option<SocketAddr>>>) -> Self {
+    fn new(zenoh_pub: zenoh::pubsub::Publisher<'static>) -> Self {
         Self {
-            socket,
-            peer,
             sequence: AtomicU8::new(0),
+            zenoh_pub,
         }
     }
 
     async fn send(&self, msg: MavMessage) {
-        let peer = *self.peer.lock().await;
-        let Some(addr) = peer else { return };
-
         let header = MavHeader {
-            system_id: 1,
-            component_id: 1,
+            system_id: SYSTEM_ID,
+            component_id: COMPONENT_ID,
             sequence: self.sequence.fetch_add(1, Ordering::Relaxed),
         };
 
         let mut buf = Vec::with_capacity(280);
         mavlink::write_v2_msg(&mut buf, header, &msg).ok();
-        if let Err(e) = self.socket.send_to(&buf, addr).await {
-            debug!("MAVLink send error: {}", e);
+        if let Err(e) = self.zenoh_pub.put(&buf).await {
+            debug!("MAVLink zenoh publish error: {}", e);
         }
     }
 }
 
-// --- Message parsing ---
+// --- UDP → Zenoh bridge (inbound) ---
 
-/// Try parsing a MAVLink v2 message.
-fn parse_mavlink(data: &[u8]) -> Option<MavMessage> {
-    let mut reader = PeekReader::new(Cursor::new(data));
-    if let Ok((_header, msg)) = mavlink::read_v2_msg::<MavMessage, _>(&mut reader) {
-        return Some(msg);
-    }
-    // Retry as raw v2 and parse manually
-    let mut reader = PeekReader::new(Cursor::new(data));
-    if let Ok(raw) = mavlink::read_v2_raw_message::<MavMessage, _>(&mut reader) {
-        if let Ok(msg) = MavMessage::parse(MavlinkVersion::V2, raw.message_id(), raw.payload()) {
-            return Some(msg);
-        }
-    }
-    None
-}
-
-// --- Receiver task ---
-
-async fn receiver_task(
+async fn udp_to_zenoh_task(
     socket: Arc<UdpSocket>,
     peer: Arc<Mutex<Option<SocketAddr>>>,
-    sender: Arc<MavSender>,
-    cmd_tx: mpsc::Sender<AutopilotCommand>,
-    params: ParamStore,
+    zenoh_pub: zenoh::pubsub::Publisher<'static>,
 ) {
     let mut buf = [0u8; 512];
 
@@ -164,15 +142,77 @@ async fn receiver_task(
             *p = Some(from);
         }
 
+        // Publish raw received bytes to Zenoh
+        if let Err(e) = zenoh_pub.put(&buf[..n]).await {
+            debug!("MAVLink zenoh publish error: {}", e);
+        }
+    }
+}
+
+// --- Zenoh → UDP bridge (outbound) ---
+
+async fn zenoh_to_udp_task(
+    subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
+    socket: Arc<UdpSocket>,
+    peer: Arc<Mutex<Option<SocketAddr>>>,
+) {
+    loop {
+        let sample = match subscriber.recv_async().await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("MAVLink zenoh_to_udp subscriber error: {}", e);
+                break;
+            }
+        };
+
+        let payload = sample.payload().to_bytes();
+        // Only forward frames from our system_id (outgoing messages)
+        // MAVLink v2 frame: buf[0]==0xFD, buf[5]==system_id
+        if payload.len() >= 6 && payload[0] == 0xFD && payload[5] == SYSTEM_ID {
+            let addr = *peer.lock().await;
+            if let Some(addr) = addr {
+                if let Err(e) = socket.send_to(&payload, addr).await {
+                    debug!("MAVLink UDP send error: {}", e);
+                }
+            }
+        }
+    }
+}
+
+// --- Zenoh → command processing ---
+
+async fn zenoh_consumer_task(
+    subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
+    sender: Arc<MavSender>,
+    cmd_tx: mpsc::Sender<AutopilotCommand>,
+    params: ParamStore,
+) {
+    loop {
+        let sample = match subscriber.recv_async().await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("MAVLink zenoh_consumer subscriber error: {}", e);
+                break;
+            }
+        };
+
+        let payload = sample.payload().to_bytes();
+
         // Parse MAVLink message
-        let Some(msg) = parse_mavlink(&buf[..n]) else {
+        let mut reader = PeekReader::new(Cursor::new(payload.as_ref()));
+        let Ok((header, msg)) = mavlink::read_v2_msg::<MavMessage, _>(&mut reader) else {
             continue;
         };
+
+        // Ignore our own outgoing messages (echo prevention)
+        if header.system_id == SYSTEM_ID && header.component_id == COMPONENT_ID {
+            continue;
+        }
 
         match msg {
             MavMessage::HEARTBEAT(_) => {
                 // Ignore GCS heartbeats
-                debug!("MAVLink: received GCS heartbeat from {}", from);
+                debug!("MAVLink: received GCS heartbeat (sys={})", header.system_id);
             }
             MavMessage::COMMAND_LONG(cmd) => {
                 handle_command_long(&sender, &cmd_tx, &cmd, &params).await;
@@ -517,6 +557,8 @@ async fn telemetry_task(
 pub async fn start(
     bind_addr: &str,
     telem_source: Arc<Mutex<dyn Fn() -> TelemetrySnapshot + Send>>,
+    zenoh_session: &zenoh::Session,
+    mavlink_topic: String,
 ) -> Result<
     (mpsc::Receiver<AutopilotCommand>, Arc<Mutex<MavlinkState>>),
     Box<dyn std::error::Error + Send + Sync>,
@@ -524,8 +566,16 @@ pub async fn start(
     let socket = Arc::new(UdpSocket::bind(bind_addr).await?);
     info!("MAVLink interface bound to {}", bind_addr);
 
+    // Publishers: one for MavSender (outgoing messages), one for UDP→Zenoh bridge
+    let send_publisher = zenoh_session.declare_publisher(mavlink_topic.clone()).await?;
+    let udp_in_publisher = zenoh_session.declare_publisher(mavlink_topic.clone()).await?;
+
+    // Subscribers: one for Zenoh→UDP bridge, one for command consumer
+    let udp_out_subscriber = zenoh_session.declare_subscriber(mavlink_topic.clone()).await?;
+    let consumer_subscriber = zenoh_session.declare_subscriber(mavlink_topic).await?;
+
     let peer: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
-    let sender = Arc::new(MavSender::new(socket.clone(), peer.clone()));
+    let sender = Arc::new(MavSender::new(send_publisher));
 
     let mav_state = Arc::new(Mutex::new(MavlinkState {
         armed: false,
@@ -537,10 +587,23 @@ pub async fn start(
 
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
 
-    // Spawn receiver task
-    tokio::spawn(receiver_task(
+    // Spawn UDP → Zenoh bridge (inbound)
+    tokio::spawn(udp_to_zenoh_task(
         socket.clone(),
         peer.clone(),
+        udp_in_publisher,
+    ));
+
+    // Spawn Zenoh → UDP bridge (outbound)
+    tokio::spawn(zenoh_to_udp_task(
+        udp_out_subscriber,
+        socket.clone(),
+        peer.clone(),
+    ));
+
+    // Spawn Zenoh → command consumer
+    tokio::spawn(zenoh_consumer_task(
+        consumer_subscriber,
         sender.clone(),
         cmd_tx,
         params,

@@ -572,7 +572,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     },
                 }
             }));
-        let (rx, ms) = mavlink_interface::start(bind, telem_source).await?;
+        let mavlink_topic = topics::topic(&args.zenoh_prefix, topics::MAVLINK);
+        info!("MAVLink publishing on: {}", mavlink_topic);
+        let (rx, ms) = mavlink_interface::start(bind, telem_source, &session, mavlink_topic).await?;
         (Some(rx), Some(ms))
     } else {
         (None, None)
