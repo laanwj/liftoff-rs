@@ -6,6 +6,7 @@ members = [
     "liftoff-gpsd",
     "liftoff-forward",
     "liftoff-autopilot",
+    "liftoff-mavlink-bridge",
 ]
 
 [workspace.dependencies]

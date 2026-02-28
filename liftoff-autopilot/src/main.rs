@@ -111,9 +111,9 @@ struct Args {
     #[arg(long, default_value = topics::DEFAULT_PREFIX)]
     zenoh_prefix: String,
 
-    /// MAVLink UDP bind address (e.g. 0.0.0.0:14550). Enables MAVLink interface when set.
+    /// Enable MAVLink interface (via Zenoh). Disables auto-arm (waits for MAVLink ARM command).
     #[arg(long)]
-    mavlink_bind: Option<String>,
+    mavlink: bool,
 }
 
 // PID Controller
@@ -533,8 +533,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     // Start MAVLink interface if enabled
-    let mavlink_enabled = args.mavlink_bind.is_some();
-    let (mut cmd_rx, mav_state) = if let Some(ref bind) = args.mavlink_bind {
+    let mavlink_enabled = args.mavlink;
+    let (mut cmd_rx, mav_state) = if mavlink_enabled {
         let state_for_mav = state.clone();
         let telem_source: Arc<Mutex<dyn Fn() -> mavlink_interface::TelemetrySnapshot + Send>> =
             Arc::new(Mutex::new(move || {
@@ -573,8 +573,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
             }));
         let mavlink_topic = topics::topic(&args.zenoh_prefix, topics::MAVLINK);
-        info!("MAVLink publishing on: {}", mavlink_topic);
-        let (rx, ms) = mavlink_interface::start(bind, telem_source, &session, mavlink_topic).await?;
+        info!("MAVLink topic: {}", mavlink_topic);
+        let (rx, ms) = mavlink_interface::start(telem_source, &session, mavlink_topic).await?;
         (Some(rx), Some(ms))
     } else {
         (None, None)

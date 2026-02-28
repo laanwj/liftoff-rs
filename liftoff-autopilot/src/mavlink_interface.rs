@@ -4,10 +4,8 @@ use mavlink::{MavHeader, Message};
 use mavlink::peek_reader::PeekReader;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, Instant, interval};
 
@@ -111,70 +109,6 @@ impl MavSender {
         mavlink::write_v2_msg(&mut buf, header, &msg).ok();
         if let Err(e) = self.zenoh_pub.put(&buf).await {
             debug!("MAVLink zenoh publish error: {}", e);
-        }
-    }
-}
-
-// --- UDP → Zenoh bridge (inbound) ---
-
-async fn udp_to_zenoh_task(
-    socket: Arc<UdpSocket>,
-    peer: Arc<Mutex<Option<SocketAddr>>>,
-    zenoh_pub: zenoh::pubsub::Publisher<'static>,
-) {
-    let mut buf = [0u8; 512];
-
-    loop {
-        let (n, from) = match socket.recv_from(&mut buf).await {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("MAVLink recv error: {}", e);
-                continue;
-            }
-        };
-
-        // Learn peer address from first incoming packet
-        {
-            let mut p = peer.lock().await;
-            if p.is_none() {
-                info!("MAVLink peer discovered: {}", from);
-            }
-            *p = Some(from);
-        }
-
-        // Publish raw received bytes to Zenoh
-        if let Err(e) = zenoh_pub.put(&buf[..n]).await {
-            debug!("MAVLink zenoh publish error: {}", e);
-        }
-    }
-}
-
-// --- Zenoh → UDP bridge (outbound) ---
-
-async fn zenoh_to_udp_task(
-    subscriber: zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>,
-    socket: Arc<UdpSocket>,
-    peer: Arc<Mutex<Option<SocketAddr>>>,
-) {
-    loop {
-        let sample = match subscriber.recv_async().await {
-            Ok(s) => s,
-            Err(e) => {
-                warn!("MAVLink zenoh_to_udp subscriber error: {}", e);
-                break;
-            }
-        };
-
-        let payload = sample.payload().to_bytes();
-        // Only forward frames from our system_id (outgoing messages)
-        // MAVLink v2 frame: buf[0]==0xFD, buf[5]==system_id
-        if payload.len() >= 6 && payload[0] == 0xFD && payload[5] == SYSTEM_ID {
-            let addr = *peer.lock().await;
-            if let Some(addr) = addr {
-                if let Err(e) = socket.send_to(&payload, addr).await {
-                    debug!("MAVLink UDP send error: {}", e);
-                }
-            }
         }
     }
 }
@@ -555,7 +489,6 @@ async fn telemetry_task(
 // --- Public entry point ---
 
 pub async fn start(
-    bind_addr: &str,
     telem_source: Arc<Mutex<dyn Fn() -> TelemetrySnapshot + Send>>,
     zenoh_session: &zenoh::Session,
     mavlink_topic: String,
@@ -563,18 +496,12 @@ pub async fn start(
     (mpsc::Receiver<AutopilotCommand>, Arc<Mutex<MavlinkState>>),
     Box<dyn std::error::Error + Send + Sync>,
 > {
-    let socket = Arc::new(UdpSocket::bind(bind_addr).await?);
-    info!("MAVLink interface bound to {}", bind_addr);
-
-    // Publishers: one for MavSender (outgoing messages), one for UDP→Zenoh bridge
+    // Publisher for outgoing MAVLink messages (heartbeat, telemetry, ACKs)
     let send_publisher = zenoh_session.declare_publisher(mavlink_topic.clone()).await?;
-    let udp_in_publisher = zenoh_session.declare_publisher(mavlink_topic.clone()).await?;
 
-    // Subscribers: one for Zenoh→UDP bridge, one for command consumer
-    let udp_out_subscriber = zenoh_session.declare_subscriber(mavlink_topic.clone()).await?;
+    // Subscriber for incoming MAVLink messages (commands from GCS via bridge)
     let consumer_subscriber = zenoh_session.declare_subscriber(mavlink_topic).await?;
 
-    let peer: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
     let sender = Arc::new(MavSender::new(send_publisher));
 
     let mav_state = Arc::new(Mutex::new(MavlinkState {
@@ -586,20 +513,6 @@ pub async fn start(
     let params: ParamStore = Arc::new(Mutex::new(default_params()));
 
     let (cmd_tx, cmd_rx) = mpsc::channel(32);
-
-    // Spawn UDP → Zenoh bridge (inbound)
-    tokio::spawn(udp_to_zenoh_task(
-        socket.clone(),
-        peer.clone(),
-        udp_in_publisher,
-    ));
-
-    // Spawn Zenoh → UDP bridge (outbound)
-    tokio::spawn(zenoh_to_udp_task(
-        udp_out_subscriber,
-        socket.clone(),
-        peer.clone(),
-    ));
 
     // Spawn Zenoh → command consumer
     tokio::spawn(zenoh_consumer_task(
