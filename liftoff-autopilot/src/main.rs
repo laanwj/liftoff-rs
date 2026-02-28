@@ -201,6 +201,10 @@ struct DroneState {
     gps_lat: f64,
     gps_lon: f64,
     gps_alt: f64,
+    // Battery telemetry
+    battery_voltage_mv: u32, // millivolts
+    battery_current_ca: i16, // centi-amps (10mA units), -1 = unknown
+    battery_remaining: i8,   // percent, -1 = unknown
 }
 
 impl Default for DroneState {
@@ -217,6 +221,9 @@ impl Default for DroneState {
             gps_lat: 0.0,
             gps_lon: 0.0,
             gps_alt: 0.0,
+            battery_voltage_mv: 0,
+            battery_current_ca: -1,
+            battery_remaining: -1,
         }
     }
 }
@@ -517,6 +524,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             Some(Vector3::new(0.0, vs, 0.0));
                                     }
                                 }
+                                CrsfPacket::Battery(bat) => {
+                                    debug!("RX Battery: {:.1}V {:.1}A {}%",
+                                        bat.voltage_v(), bat.current_a(), bat.remaining);
+                                    // CRSF voltage is dV → MAVLink wants mV
+                                    s.battery_voltage_mv = bat.voltage as u32 * 100;
+                                    // CRSF current is dA → MAVLink wants cA (10mA)
+                                    s.battery_current_ca = bat.current as i16;
+                                    s.battery_remaining = bat.remaining as i8;
+                                }
                                 _ => {
                                     debug!("RX other packet: {:?}", packet);
                                 }
@@ -557,6 +573,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             vel_d,
                             yaw: s.yaw,
                             has_gps: s.gps_origin.is_some(),
+                            battery_voltage_mv: s.battery_voltage_mv,
+                            battery_current_ca: s.battery_current_ca,
+                            battery_remaining: s.battery_remaining,
                         }
                     }
                     Err(_) => mavlink_interface::TelemetrySnapshot {
@@ -569,6 +588,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         vel_d: 0.0,
                         yaw: 0.0,
                         has_gps: false,
+                        battery_voltage_mv: 0,
+                        battery_current_ca: -1,
+                        battery_remaining: -1,
                     },
                 }
             }));

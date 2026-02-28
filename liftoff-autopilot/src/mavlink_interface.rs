@@ -81,6 +81,9 @@ pub struct TelemetrySnapshot {
     pub vel_d: f64,
     pub yaw: f64,
     pub has_gps: bool,
+    pub battery_voltage_mv: u32,
+    pub battery_current_ca: i16,
+    pub battery_remaining: i8,
 }
 
 // --- MavSender helper ---
@@ -405,6 +408,16 @@ async fn telemetry_task(
     let mut ticker_position = interval(Duration::from_millis(250)); // 4Hz
     let mut ticker_gps_raw = interval(Duration::from_secs(1)); // 1Hz
     let mut ticker_ext_state = interval(Duration::from_secs(1)); // 1Hz
+    let mut ticker_sys_status = interval(Duration::from_secs(1)); // 1Hz
+
+    // Sensors we report as present, enabled, and healthy
+    let sensors = MavSysStatusSensor::MAV_SYS_STATUS_SENSOR_3D_GYRO
+        | MavSysStatusSensor::MAV_SYS_STATUS_SENSOR_3D_ACCEL
+        | MavSysStatusSensor::MAV_SYS_STATUS_SENSOR_3D_MAG
+        | MavSysStatusSensor::MAV_SYS_STATUS_SENSOR_GPS
+        | MavSysStatusSensor::MAV_SYS_STATUS_AHRS
+        | MavSysStatusSensor::MAV_SYS_STATUS_PREARM_CHECK;
+
     loop {
         tokio::select! {
             _ = ticker_position.tick() => {
@@ -465,6 +478,24 @@ async fn telemetry_task(
                     approach_x: 0.0,
                     approach_y: 0.0,
                     approach_z: 0.0,
+                })).await;
+            }
+            _ = ticker_sys_status.tick() => {
+                let snap = (telem_source.lock().await)();
+                sender.send(MavMessage::SYS_STATUS(SYS_STATUS_DATA {
+                    onboard_control_sensors_present: sensors,
+                    onboard_control_sensors_enabled: sensors,
+                    onboard_control_sensors_health: sensors,
+                    load: 0,
+                    voltage_battery: snap.battery_voltage_mv as u16, // mV
+                    current_battery: snap.battery_current_ca,        // cA (10mA)
+                    battery_remaining: snap.battery_remaining,       // %
+                    drop_rate_comm: 0,
+                    errors_comm: 0,
+                    errors_count1: 0,
+                    errors_count2: 0,
+                    errors_count3: 0,
+                    errors_count4: 0,
                 })).await;
             }
             _ = ticker_ext_state.tick() => {
