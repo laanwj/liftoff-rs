@@ -25,9 +25,8 @@ Tools and background services for CRSF joystick, telemetry, and autopilot, to us
  ━ hardware                         └──────┘       ╚══════╝
 ```
 
-- `liftoff-bridge`: Simulator bridge. Receives liftoff's native UDP telemetry and publishes it to Zenoh
 - `liftoff-forward`: CRSF forwarder. Bridges CRSF RC channels and telemetry between an ELRS serial receiver and Zenoh
-- `liftoff-input`: CRSF joystick + mux. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick. Also converts sim telemetry to CRSF telemetry for the radio
+- `liftoff-input`: Simulator bridge + CRSF joystick + mux. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick. Also converts sim telemetry to CRSF telemetry for the radio
 - `liftoff-autopilot`: PID autopilot with waypoint navigation. Subscribes to CRSF telemetry, publishes RC channels to `crsf/rc/autopilot`
 - `liftoff-gpsd`: gpsd emulator for viewing liftoff telemetry in QGIS
 
@@ -94,29 +93,6 @@ Below are the command-line help for all the services. All services are optional.
 All services share the common Zenoh options `--zenoh-connect`, `--zenoh-mode`, and `--zenoh-prefix`. By default they use peer discovery on prefix `liftoff`. To connect to a specific Zenoh router, use `--zenoh-connect tcp/host:7447`.
 
 ```
-$ target/release/liftoff-bridge --help
-Usage: liftoff-bridge [OPTIONS]
-
-Options:
-      --sim-bind <SIM_BIND>
-          Bind address for simulator telemetry UDP [default: 127.0.0.1:9001]
-      --zenoh-connect <ZENOH_CONNECT>
-          Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
-      --zenoh-mode <ZENOH_MODE>
-          Zenoh mode (peer or client) [default: peer]
-      --zenoh-prefix <ZENOH_PREFIX>
-          Zenoh topic prefix [default: liftoff]
-      --metrics-tcp
-          Enable metrics reporting using metrics-rs-tcp-exporter
-      --metrics-tcp-bind <METRICS_TCP_BIND>
-          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5001]
-  -h, --help
-          Print help
-  -V, --version
-          Print version
-```
-
-```
 $ target/release/liftoff-forward --help
 Usage: liftoff-forward [OPTIONS]
 
@@ -146,6 +122,8 @@ $ target/release/liftoff-input --help
 Usage: liftoff-input [OPTIONS]
 
 Options:
+      --sim-bind <SIM_BIND>
+          Bind address for simulator telemetry UDP [default: 127.0.0.1:9001]
       --zenoh-connect <ZENOH_CONNECT>
           Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
       --zenoh-mode <ZENOH_MODE>

@@ -10,12 +10,17 @@ use metrics::{Unit, counter, describe_counter};
 use metrics_exporter_tcp::TcpBuilder;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use zenoh::Config;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Bind address for simulator telemetry UDP.
+    #[arg(long, default_value = "127.0.0.1:9001")]
+    sim_bind: std::net::SocketAddr,
+
     /// Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery.
     #[arg(long)]
     zenoh_connect: Option<String>,
@@ -337,6 +342,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Unit::Count,
         "Updates to virtual input device"
     );
+    describe_counter!(
+        "bridge.packet.rx",
+        Unit::Count,
+        "Incoming telemetry packets from sim"
+    );
+    describe_counter!(
+        "bridge.packet.tx",
+        Unit::Count,
+        "Telemetry packets published to Zenoh"
+    );
 
     // Zenoh session
     let mut config = Config::default();
@@ -361,6 +376,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tel_subscriber = session.declare_subscriber(&tel_topic).await?;
     let rc_subscriber = session.declare_subscriber(&crsf_rc_topic).await?;
     let rc_ap_subscriber = session.declare_subscriber(&crsf_rc_ap_topic).await?;
+
+    // Bridge task: receive sim UDP telemetry and publish to Zenoh
+    let bridge_publisher = session.declare_publisher(tel_topic.clone()).await?;
+    let sock = UdpSocket::bind(args.sim_bind).await?;
+    info!("Bridge: simulator telemetry on {}", args.sim_bind);
+    tokio::spawn(async move {
+        let mut buf = [0u8; 4096];
+        loop {
+            match sock.recv_from(&mut buf).await {
+                Ok((len, _addr)) => {
+                    trace!("rx sim {} bytes", len);
+                    counter!("bridge.packet.rx").increment(1);
+                    if let Err(e) = bridge_publisher.put(&buf[..len]).await {
+                        warn!("Failed to publish sim telemetry: {}", e);
+                    } else {
+                        counter!("bridge.packet.tx").increment(1);
+                    }
+                }
+                Err(e) => {
+                    error!("UDP recv error: {}", e);
+                }
+            }
+        }
+    });
 
     // Create uinput device
     // NOTE: This requires permission to write to /dev/uinput

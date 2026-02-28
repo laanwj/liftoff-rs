@@ -1112,20 +1112,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "liftoff-bridge"
-version = "0.1.0"
-dependencies = [
- "clap",
- "env_logger",
- "liftoff-lib",
- "log",
- "metrics",
- "metrics-exporter-tcp",
- "tokio",
- "zenoh",
-]
-
-[[package]]
 name = "liftoff-forward"
 version = "0.1.0"
 dependencies = [

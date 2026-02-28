@@ -8,10 +8,8 @@ liftoff-rs uses [Zenoh](https://zenoh.io) pub/sub for all inter-component commun
 LOCAL                                    CLOUD
                                          Liftoff Sim
                                            | UDP :9001
-                                         liftoff-bridge
-                                           | liftoff/telemetry
-                                         liftoff-input
-                                           | liftoff/crsf/telemetry
+                                         liftoff-input (bridge + joystick + mux)
+                                           | liftoff/telemetry, liftoff/crsf/telemetry
 liftoff-forward  <------- zenohd -------> (all topics)
   | serial                                 | liftoff/crsf/rc
 Radio TX                                 liftoff-input -> uinput -> Sim
@@ -21,7 +19,7 @@ Radio TX                                 liftoff-input -> uinput -> Sim
 
 | Topic                       | Direction         | Content                    |
 |-----------------------------|-------------------|----------------------------|
-| `liftoff/telemetry`         | bridge -> input, gpsd | Raw sim telemetry bytes |
+| `liftoff/telemetry`         | input -> gpsd, autopilot | Raw sim telemetry bytes |
 | `liftoff/crsf/telemetry`   | input -> forward, autopilot | Individual CRSF frames |
 | `liftoff/crsf/rc`          | forward/autopilot -> input | CRSF RC channel frames |
 
@@ -29,8 +27,7 @@ Radio TX                                 liftoff-input -> uinput -> Sim
 
 | Binary              | Where    | Role                                              |
 |---------------------|----------|----------------------------------------------------|
-| `liftoff-bridge`    | Cloud    | Receives sim UDP telemetry, publishes to Zenoh     |
-| `liftoff-input`     | Cloud    | CRSF <-> virtual joystick (uinput) for the sim     |
+| `liftoff-input`     | Cloud    | Sim UDP bridge + CRSF joystick (uinput) + RC mux  |
 | `liftoff-forward`   | Local    | Serial port (radio TX) <-> Zenoh                  |
 | `liftoff-autopilot` | Local    | Autonomous flight controller                       |
 | `liftoff-gpsd`      | Either   | NMEA GPS server from telemetry                     |
@@ -51,10 +48,7 @@ cargo install zenohd
 # Zenoh router (UDP, listens for remote connections)
 zenohd --listen udp/0.0.0.0:7447
 
-# Bridge (sim telemetry -> Zenoh)
-liftoff-bridge --sim-bind 127.0.0.1:9001
-
-# Input (Zenoh -> virtual joystick for sim)
+# Input (sim UDP bridge + virtual joystick for sim)
 liftoff-input
 ```
 
@@ -83,12 +77,10 @@ Use `--zenoh-prefix` to isolate multiple drones on the same Zenoh network:
 
 ```bash
 # Drone 1 (default prefix "liftoff")
-liftoff-bridge --sim-bind 127.0.0.1:9001
 liftoff-input
 
 # Drone 2
-liftoff-bridge --sim-bind 127.0.0.1:9002 --zenoh-prefix drone2
-liftoff-input --zenoh-prefix drone2
+liftoff-input --sim-bind 127.0.0.1:9002 --zenoh-prefix drone2
 liftoff-autopilot --zenoh-prefix drone2 --zenoh-connect udp/<CLOUD_IP>:7447
 ```
 

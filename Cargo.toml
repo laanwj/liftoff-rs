@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "liftoff-lib",
     "liftoff-input",
-    "liftoff-bridge",
     "liftoff-gpsd",
     "liftoff-forward",
     "liftoff-autopilot",
