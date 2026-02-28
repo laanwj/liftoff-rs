@@ -258,8 +258,8 @@ impl Controller {
 
             // Position -> Angle (direct, no velocity cascade)
             // Velocity is derived from position differences and used only as damping.
-            pos_x_pid: Pid::new(0.05, 0.0, 0.0, 0.3, 0.0), // Max ~17 deg lean
-            pos_y_pid: Pid::new(0.05, 0.0, 0.0, 0.3, 0.0),
+            pos_x_pid: Pid::new(0.05, 0.0, 0.0, 0.5, 0.0), // Max ~29 deg lean
+            pos_y_pid: Pid::new(0.05, 0.0, 0.0, 0.5, 0.0),
 
             // Angle -> Rate -> Stick
             // Simplified: P-control on Angle Error gives Stick Input directly (~Rate)
@@ -632,6 +632,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Main control loop
     let mut armed = false;
+    let mut landing_settled_since: Option<Instant> = None;
     let shutdown = tokio::signal::ctrl_c();
     tokio::pin!(shutdown);
 
@@ -752,13 +753,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         info!("Flight mode: Takeoff -> InAir (alt={:.1})", current_alt);
                         s.flight_mode = mavlink_interface::FlightMode::InAir;
                     }
-                    mavlink_interface::FlightMode::Landing if current_alt < 0.5 => {
-                        info!("Flight mode: Landing -> OnGround, auto-disarm");
-                        s.flight_mode = mavlink_interface::FlightMode::OnGround;
-                        s.armed = false;
-                        drop(s);
-                        armed = false;
-                        controller.armed = false;
+                    mavlink_interface::FlightMode::Landing => {
+                        // Detect landing via velocity: if nearly stationary for 1.5s, we're on the ground
+                        let speed = drone_state.velocity.map_or(1.0, |v| v.norm());
+                        if speed < 0.3 {
+                            if landing_settled_since.is_none() {
+                                landing_settled_since = Some(Instant::now());
+                            }
+                            if landing_settled_since.is_some_and(|t| t.elapsed() > Duration::from_millis(1500)) {
+                                info!("Flight mode: Landing -> OnGround (velocity settled), auto-disarm");
+                                s.flight_mode = mavlink_interface::FlightMode::OnGround;
+                                s.armed = false;
+                                drop(s);
+                                armed = false;
+                                controller.armed = false;
+                                landing_settled_since = None;
+                            }
+                        } else {
+                            landing_settled_since = None;
+                        }
                     }
                     _ => {}
                 }
