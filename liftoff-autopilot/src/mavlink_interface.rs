@@ -142,7 +142,6 @@ async fn receiver_task(
     peer: Arc<Mutex<Option<SocketAddr>>>,
     sender: Arc<MavSender>,
     cmd_tx: mpsc::Sender<AutopilotCommand>,
-    telem_source: Arc<Mutex<dyn Fn() -> TelemetrySnapshot + Send>>,
     params: ParamStore,
 ) {
     let mut buf = [0u8; 512];
@@ -165,7 +164,7 @@ async fn receiver_task(
             *p = Some(from);
         }
 
-        // Parse MAVLink message (try v2 first, then v1)
+        // Parse MAVLink message
         let Some(msg) = parse_mavlink(&buf[..n]) else {
             continue;
         };
@@ -176,7 +175,7 @@ async fn receiver_task(
                 debug!("MAVLink: received GCS heartbeat from {}", from);
             }
             MavMessage::COMMAND_LONG(cmd) => {
-                handle_command_long(&sender, &cmd_tx, &cmd, &telem_source, &params).await;
+                handle_command_long(&sender, &cmd_tx, &cmd, &params).await;
             }
             MavMessage::COMMAND_INT(cmd) => {
                 handle_command_int(&sender, &cmd_tx, &cmd).await;
@@ -198,7 +197,6 @@ async fn handle_command_long(
     sender: &MavSender,
     cmd_tx: &mpsc::Sender<AutopilotCommand>,
     cmd: &COMMAND_LONG_DATA,
-    telem_source: &Arc<Mutex<dyn Fn() -> TelemetrySnapshot + Send>>,
     params: &ParamStore,
 ) {
     let result = match cmd.command {
@@ -248,14 +246,9 @@ async fn handle_command_long(
                     send_autopilot_version(sender).await;
                     MavResult::MAV_RESULT_ACCEPTED
                 }
-                // 242 = HOME_POSITION
-                242 => {
-                    send_home_position(sender, telem_source).await;
-                    MavResult::MAV_RESULT_ACCEPTED
-                }
                 _ => {
                     // ACK as accepted for messages we already stream
-                    // (GLOBAL_POSITION_INT=33, GPS_RAW_INT=24, etc.)
+                    // (GLOBAL_POSITION_INT=33, GPS_RAW_INT=24, HOME_POSITION=242, etc.)
                     MavResult::MAV_RESULT_ACCEPTED
                 }
             }
@@ -298,35 +291,6 @@ async fn send_autopilot_version(sender: &MavSender) {
             flight_custom_version: [0; 8],
             middleware_custom_version: [0; 8],
             os_custom_version: [0; 8],
-        }))
-        .await;
-}
-
-async fn send_home_position(
-    sender: &MavSender,
-    telem_source: &Arc<Mutex<dyn Fn() -> TelemetrySnapshot + Send>>,
-) {
-    let snap = (telem_source.lock().await)();
-    if !snap.has_gps {
-        debug!("MAVLink: HOME_POSITION requested but no GPS yet");
-        return;
-    }
-    info!(
-        "MAVLink: sending HOME_POSITION lat={:.6} lon={:.6} alt={:.1}",
-        snap.gps_lat, snap.gps_lon, snap.alt_origin
-    );
-    sender
-        .send(MavMessage::HOME_POSITION(HOME_POSITION_DATA {
-            latitude: (snap.gps_lat * 1e7) as i32,
-            longitude: (snap.gps_lon * 1e7) as i32,
-            altitude: (snap.alt_origin * 1000.0) as i32,
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            q: [1.0, 0.0, 0.0, 0.0],
-            approach_x: 0.0,
-            approach_y: 0.0,
-            approach_z: 0.0,
         }))
         .await;
 }
@@ -467,8 +431,6 @@ async fn telemetry_task(
     let mut ticker_position = interval(Duration::from_millis(250)); // 4Hz
     let mut ticker_gps_raw = interval(Duration::from_secs(1)); // 1Hz
     let mut ticker_ext_state = interval(Duration::from_secs(1)); // 1Hz
-    let mut home_sent = false;
-
     loop {
         tokio::select! {
             _ = ticker_position.tick() => {
@@ -518,25 +480,18 @@ async fn telemetry_task(
                     satellites_visible: 12,
                 })).await;
 
-                // Send HOME_POSITION once
-                if !home_sent {
-                    home_sent = true;
-                    info!("MAVLink: sending HOME_POSITION lat={:.6} lon={:.6} alt={:.1}",
-                        snap.gps_lat, snap.gps_lon, snap.alt_origin);
-
-                    sender.send(MavMessage::HOME_POSITION(HOME_POSITION_DATA {
-                        latitude: (snap.gps_lat * 1e7) as i32,
-                        longitude: (snap.gps_lon * 1e7) as i32,
-                        altitude: (snap.alt_origin * 1000.0) as i32,
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
-                        q: [1.0, 0.0, 0.0, 0.0],
-                        approach_x: 0.0,
-                        approach_y: 0.0,
-                        approach_z: 0.0,
-                    })).await;
-                }
+                sender.send(MavMessage::HOME_POSITION(HOME_POSITION_DATA {
+                    latitude: (snap.gps_lat * 1e7) as i32,
+                    longitude: (snap.gps_lon * 1e7) as i32,
+                    altitude: (snap.alt_origin * 1000.0) as i32,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    q: [1.0, 0.0, 0.0, 0.0],
+                    approach_x: 0.0,
+                    approach_y: 0.0,
+                    approach_z: 0.0,
+                })).await;
             }
             _ = ticker_ext_state.tick() => {
                 let state = mav_state.lock().await;
@@ -588,7 +543,6 @@ pub async fn start(
         peer.clone(),
         sender.clone(),
         cmd_tx,
-        telem_source.clone(),
         params,
     ));
 
