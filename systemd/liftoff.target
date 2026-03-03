@@ -1,0 +1,5 @@
+[Unit]
+Description=Liftoff services (manual)
+
+[Install]
+WantedBy=default.target

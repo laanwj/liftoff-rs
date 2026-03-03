@@ -1,0 +1,12 @@
+[Unit]
+Description=Zenoh router for liftoff-rs
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/zenohd --listen udp/0.0.0.0:7447
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
