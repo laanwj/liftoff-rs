@@ -3,6 +3,7 @@ use evdev::uinput::VirtualDevice;
 use evdev::{AbsoluteAxisCode, AttributeSet, InputId, KeyCode, MiscCode, UinputAbsSetup};
 use liftoff_lib::crsf::{self, CrsfPacket};
 use liftoff_lib::crsf_tx;
+use liftoff_lib::simstate::{self, BatteryPacket, SimstatePacket};
 use liftoff_lib::telemetry::{self};
 use liftoff_lib::topics;
 use log::{error, info, trace, warn};
@@ -20,6 +21,11 @@ struct Args {
     /// Bind address for simulator telemetry UDP.
     #[arg(long, default_value = "127.0.0.1:9001")]
     sim_bind: std::net::SocketAddr,
+
+    /// Bind address for the liftoff-simstate-bridge UDP stream
+    /// (per-prop damage + battery telemetry from the BepInEx plugin).
+    #[arg(long, default_value = "127.0.0.1:9020")]
+    simstate_bind: std::net::SocketAddr,
 
     /// Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery.
     #[arg(long)]
@@ -352,6 +358,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Unit::Count,
         "Telemetry packets published to Zenoh"
     );
+    describe_counter!(
+        "simstate.damage.rx",
+        Unit::Count,
+        "Damage UDP packets received from simstate-bridge"
+    );
+    describe_counter!(
+        "simstate.battery.rx",
+        Unit::Count,
+        "Battery UDP packets received from simstate-bridge"
+    );
+    describe_counter!(
+        "simstate.parse_error",
+        Unit::Count,
+        "Malformed simstate UDP packets"
+    );
 
     // Zenoh session
     let mut config = Config::default();
@@ -366,16 +387,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let crsf_tel_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_TELEMETRY);
     let crsf_rc_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC);
     let crsf_rc_ap_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC_AUTOPILOT);
+    let damage_topic = topics::topic(&args.zenoh_prefix, topics::DAMAGE);
+    let battery_topic = topics::topic(&args.zenoh_prefix, topics::BATTERY);
 
     info!("Subscribing to: {}", tel_topic);
     info!("Publishing on: {}", crsf_tel_topic);
     info!("Subscribing to: {} (manual)", crsf_rc_topic);
     info!("Subscribing to: {} (autopilot)", crsf_rc_ap_topic);
+    info!("Publishing on: {} (simstate damage)", damage_topic);
+    info!("Publishing on: {} (simstate battery)", battery_topic);
 
     let crsf_tel_publisher = session.declare_publisher(crsf_tel_topic).await?;
     let tel_subscriber = session.declare_subscriber(&tel_topic).await?;
     let rc_subscriber = session.declare_subscriber(&crsf_rc_topic).await?;
     let rc_ap_subscriber = session.declare_subscriber(&crsf_rc_ap_topic).await?;
+    let damage_publisher = session.declare_publisher(damage_topic).await?;
+    let battery_publisher = session.declare_publisher(battery_topic).await?;
+
+    // Shared latest battery snapshot from the simstate UDP stream. The CRSF
+    // generation task reads from here when building BatterySensor + Voltages
+    // packets so they carry real current and per-cell voltage instead of
+    // just voltage+percent from the sim's standard telemetry.
+    let battery_state: Arc<Mutex<Option<BatteryPacket>>> = Arc::new(Mutex::new(None));
+
+    // simstate-bridge UDP listener: forwards raw bytes to the corresponding
+    // Zenoh topic and updates the shared battery snapshot.
+    let simstate_sock = UdpSocket::bind(args.simstate_bind).await?;
+    info!("Bridge: simstate-bridge UDP on {}", args.simstate_bind);
+    {
+        let battery_state = battery_state.clone();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            loop {
+                match simstate_sock.recv_from(&mut buf).await {
+                    Ok((len, _addr)) => {
+                        let payload = &buf[..len];
+                        match simstate::parse_packet(payload) {
+                            Ok(SimstatePacket::Damage(_)) => {
+                                counter!("simstate.damage.rx").increment(1);
+                                if let Err(e) = damage_publisher.put(payload).await {
+                                    warn!("Failed to publish damage: {}", e);
+                                }
+                            }
+                            Ok(SimstatePacket::Battery(bat)) => {
+                                counter!("simstate.battery.rx").increment(1);
+                                *battery_state.lock().await = Some(bat);
+                                if let Err(e) = battery_publisher.put(payload).await {
+                                    warn!("Failed to publish battery: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                counter!("simstate.parse_error").increment(1);
+                                warn!("simstate parse error: {} (len={})", e, len);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("simstate UDP recv error: {}", e);
+                    }
+                }
+            }
+        });
+    }
 
     // Bridge task: receive sim UDP telemetry and publish to Zenoh
     let bridge_publisher = session.declare_publisher(tel_topic.clone()).await?;
@@ -420,6 +493,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Task: Receive raw telemetry from bridge, convert to CRSF, publish
     let crsf_tel_pub = crsf_tel_publisher;
+    let crsf_battery_state = battery_state.clone();
     tokio::spawn(async move {
         let mut next_send = tokio::time::Instant::now();
         loop {
@@ -433,7 +507,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         if let Ok(packet) =
                             telemetry::parse_packet(&payload, &config_format)
                         {
-                            let crsf_packets = crsf_tx::generate_crsf_telemetry(&packet);
+                            // Snapshot the latest LFBT data; if present and
+                            // valid, generate_crsf_telemetry will use it for
+                            // BatterySensor (full voltage/current/mAh/%) and
+                            // emit a Voltages packet alongside.
+                            let bat_snapshot = crsf_battery_state.lock().await.clone();
+                            let crsf_packets =
+                                crsf_tx::generate_crsf_telemetry(&packet, bat_snapshot.as_ref());
                             for pkt in crsf_packets {
                                 trace!("tx crsf tel {} bytes", pkt.len());
                                 if let Err(e) = crsf_tel_pub.put(pkt.as_slice()).await {

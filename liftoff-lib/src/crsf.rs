@@ -235,6 +235,15 @@ pub struct Rpm {
     pub rpms: Vec<u32>,
 }
 
+/// CRSF voltage group (per-cell) telemetry packet (type 0x0E).
+/// Reports a list of cell voltages in millivolts.
+#[derive(Debug, Clone)]
+pub struct Voltages {
+    pub source_id: u8,
+    /// Per-cell voltages in millivolts, in cell order.
+    pub voltages_mv: Vec<u16>,
+}
+
 #[derive(Debug, Clone)]
 pub struct RcChannelsPacked {
     pub channels: [u16; 16],
@@ -250,6 +259,7 @@ pub enum CrsfPacket {
     BaroAlt(BaroAlt),
     Airspeed(Airspeed),
     Rpm(Rpm),
+    Voltages(Voltages),
     RcChannelsPacked(RcChannelsPacked),
     Unknown(PacketType), // Keep Unknown for parsing existing unknown packets
 }
@@ -393,6 +403,13 @@ pub fn build_packet(address: u8, packet: &CrsfPacket) -> Option<Vec<u8>> {
                 frame.extend_from_slice(&bytes[1..]); // 3 bytes
             }
         }
+        CrsfPacket::Voltages(volts) => {
+            frame.push(PacketType::Voltages as u8);
+            frame.push(volts.source_id);
+            for &mv in &volts.voltages_mv {
+                frame.extend_from_slice(&mv.to_be_bytes());
+            }
+        }
         CrsfPacket::RcChannelsPacked(channels) => {
             frame.push(PacketType::RcChannelsPacked as u8);
             frame.extend_from_slice(&pack_channels(&channels.channels)?);
@@ -514,6 +531,22 @@ pub fn parse_packet(frame: &[u8]) -> Option<CrsfPacket> {
                 i += 3;
             }
             Some(CrsfPacket::Rpm(Rpm { source_id, rpms }))
+        }
+        PacketType::Voltages => {
+            if data.is_empty() {
+                return None;
+            }
+            let source_id = data[0];
+            let mut voltages_mv = Vec::new();
+            let mut i = 1;
+            while i + 2 <= data.len() {
+                voltages_mv.push(u16::from_be_bytes([data[i], data[i + 1]]));
+                i += 2;
+            }
+            Some(CrsfPacket::Voltages(Voltages {
+                source_id,
+                voltages_mv,
+            }))
         }
         PacketType::RcChannelsPacked => {
             let channels = unpack_channels(data)?;
@@ -701,6 +734,25 @@ mod tests {
                 assert_eq!(vario.vertical_speed, vspeed);
             }
             _ => panic!("Expected Vario packet"),
+        }
+    }
+
+    #[test]
+    fn test_voltages_roundtrip() {
+        // 4-cell pack at 3.85 V each.
+        let original = Voltages {
+            source_id: 0,
+            voltages_mv: vec![3850, 3850, 3850, 3850],
+        };
+        let frame = build_packet(SOURCE_ADDRESS, &CrsfPacket::Voltages(original.clone()))
+            .expect("build_packet");
+        assert!(frame_check_crc(&frame));
+        match parse_packet(&frame).unwrap() {
+            CrsfPacket::Voltages(v) => {
+                assert_eq!(v.source_id, original.source_id);
+                assert_eq!(v.voltages_mv, original.voltages_mv);
+            }
+            _ => panic!("expected Voltages"),
         }
     }
 

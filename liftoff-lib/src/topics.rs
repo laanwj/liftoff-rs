@@ -4,6 +4,8 @@ pub const CRSF_TELEMETRY: &str = "crsf/telemetry";
 pub const CRSF_RC: &str = "crsf/rc";
 pub const CRSF_RC_AUTOPILOT: &str = "crsf/rc/autopilot";
 pub const MAVLINK: &str = "mavlink";
+pub const DAMAGE: &str = "damage";
+pub const BATTERY: &str = "battery";
 
 pub fn topic(prefix: &str, suffix: &str) -> String {
     format!("{}/{}", prefix, suffix)
