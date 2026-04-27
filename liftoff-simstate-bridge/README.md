@@ -90,7 +90,7 @@ When `NO_DRONE` is set, `prop_count` is `0` and there are no float values.
 
 #### `damage[N]` semantics
 
-These are the raw values Liftoff stores internally — the plugin does no normalization. Empirically the field is `0.0` when healthy and increases as damage accumulates; the in-game HUD picks the "healthy / damaged / broken" color based on internal thresholds. The Rust consumer should threshold and/or normalize as needed; if you want to mirror the OSD coloring, you'll need to calibrate the thresholds against in-game behavior.
+These are the raw values Liftoff stores internally — the plugin does no normalization. The field is initialized to `1.0` (healthy) and **decreases toward `0.0` as damage accumulates** (`Propeller.ApplyDamage` subtracts from it; `FixDamage` adds back); `Propeller.IsPropellerBroken` returns true at `0`. The game internally clamps the value to `[0, 1]`. The in-game HUD picks the "healthy / damaged / broken" color based on internal thresholds — calibrate against in-game behavior if you want to mirror the OSD coloring.
 
 Propellers are reported in the order returned by Unity's `GetComponentsInChildren<Propeller>()`, which matches the order of `MotorRPM` in Liftoff's standard telemetry stream: **left front, right front, left back, right back**.
 

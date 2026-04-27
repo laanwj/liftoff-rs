@@ -14,7 +14,9 @@ pub struct DamagePacket {
     /// Plugin-monotonic milliseconds since plugin load.
     pub timestamp_ms: u64,
     /// Raw `Propeller.DamageState` floats in MotorRPM order: LF, RF, LB, RB.
-    /// 0.0 = healthy, increases with damage (typically capped at 1.0 = broken).
+    /// **1.0 = healthy, decreases toward 0.0 as damage accumulates**;
+    /// `Propeller.IsPropellerBroken` returns true when the value reaches 0.
+    /// Internally clamped to `[0, 1]` by the game.
     pub damage: Vec<f32>,
 }
 
