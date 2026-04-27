@@ -26,9 +26,10 @@ Tools and background services for CRSF joystick, telemetry, and autopilot, to us
 ```
 
 - `liftoff-forward`: CRSF forwarder. Bridges CRSF RC channels and telemetry between an ELRS serial receiver and Zenoh
-- `liftoff-input`: Simulator bridge + CRSF joystick + mux. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick. Also converts sim telemetry to CRSF telemetry for the radio
+- `liftoff-input`: Simulator bridge + CRSF joystick + mux. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Also bridges the optional [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md) UDP stream into Zenoh topics `damage` and `battery`, and feeds the per-cell voltage and current draw from there into CRSF telemetry. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick
 - `liftoff-autopilot`: PID autopilot with waypoint navigation. Subscribes to CRSF telemetry, publishes RC channels to `crsf/rc/autopilot`
 - `liftoff-gpsd`: gpsd emulator. Subscribes to CRSF telemetry and serves NMEA GPS sentences to clients like QGIS
+- [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md): BepInEx 5 Unity plugin (C#, not Rust) that exposes per-propeller damage and detailed battery telemetry — neither of which liftoff's own telemetry stream carries. It emits two UDP packet kinds (`LFDM` damage, `LFBT` battery) on a single port that `liftoff-input` consumes
 
 This project makes use of `tokio` for reliable, high-performance asynchronous I/O.
 
@@ -79,6 +80,10 @@ Create a file `TelemetryConfiguration.json` in liftoff's game configuration dire
 
 On Linux this will usually be `~/.config/unity3d/LuGus Studios/Liftoff/`. The exact path depends on the operating system and/or install location. Details can be found here: [Liftoff - Drone Telemetry](https://steamcommunity.com/sharedfiles/filedetails/?id=3160488434). This also works for Liftoff: Micro Drones.
 
+### Setting up liftoff-simstate-bridge (optional)
+
+To get per-propeller damage and detailed battery telemetry (current draw, per-cell voltage, mAh drawn, percentage), install the [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md) BepInEx plugin into your Liftoff install. Without it, `liftoff-input` still works — it just falls back to the voltage+percent that liftoff's standard telemetry provides, and the `damage` / `battery` Zenoh topics simply stay quiet.
+
 ### Building
 
 ```
@@ -124,6 +129,8 @@ Usage: liftoff-input [OPTIONS]
 Options:
       --sim-bind <SIM_BIND>
           Bind address for simulator telemetry UDP [default: 127.0.0.1:9001]
+      --simstate-bind <SIMSTATE_BIND>
+          Bind address for the liftoff-simstate-bridge UDP stream (per-prop damage + battery telemetry from the BepInEx plugin) [default: 127.0.0.1:9020]
       --zenoh-connect <ZENOH_CONNECT>
           Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
       --zenoh-mode <ZENOH_MODE>
