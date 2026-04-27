@@ -1,0 +1,14 @@
+[package]
+name = "liftoff-dashboard"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { workspace = true }
+crossterm = "0.28.1"
+env_logger = { workspace = true }
+liftoff-lib = { workspace = true }
+log = { workspace = true }
+ratatui = "0.29.0"
+tokio = { workspace = true }
+zenoh = { workspace = true }
