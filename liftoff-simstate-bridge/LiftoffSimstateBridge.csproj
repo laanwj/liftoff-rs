@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>LiftoffSimstateBridge</AssemblyName>
+    <RootNamespace>LiftoffSimstateBridge</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <NoWarn>CS0436</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    Path to the Liftoff installation. Override on the command line if your
+    install lives elsewhere, e.g.:
+      dotnet build -p:LiftoffPath=/some/other/path
+  -->
+  <PropertyGroup>
+    <LiftoffPath Condition="'$(LiftoffPath)' == ''">$(HOME)/.local/share/Steam/steamapps/common/Liftoff</LiftoffPath>
+    <LiftoffManaged>$(LiftoffPath)/Liftoff_Data/Managed</LiftoffManaged>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" />
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
+    <PackageReference Include="HarmonyX" Version="2.10.2" />
+  </ItemGroup>
+
+  <!-- Reference the game's own Unity + Assembly-CSharp DLLs so the plugin -->
+  <!-- compiles against exactly the same API surface the game ships with. -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(LiftoffManaged)/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(LiftoffManaged)/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(LiftoffManaged)/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
