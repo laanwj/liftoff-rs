@@ -2,8 +2,9 @@ use clap::Parser;
 use evdev::uinput::VirtualDevice;
 use evdev::{AbsoluteAxisCode, AttributeSet, InputId, KeyCode, MiscCode, UinputAbsSetup};
 use liftoff_lib::crsf::{self, CrsfPacket};
+use liftoff_lib::crsf_custom;
 use liftoff_lib::crsf_tx;
-use liftoff_lib::simstate::{self, BatteryPacket, SimstatePacket};
+use liftoff_lib::simstate::{self, BatteryPacket, DamagePacket, SimstatePacket};
 use liftoff_lib::telemetry::{self};
 use liftoff_lib::topics;
 use log::{error, info, trace, warn};
@@ -12,7 +13,7 @@ use metrics_exporter_tcp::TcpBuilder;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use zenoh::Config;
 
 #[derive(Parser, Debug)]
@@ -49,6 +50,7 @@ struct Args {
 }
 
 const TELEMETRY_INTERVAL: Duration = Duration::from_millis(100);
+const DAMAGE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
 // Axis constants
 const AXIS_MAX: u16 = 1983; // 1984 - 1
@@ -410,12 +412,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // just voltage+percent from the sim's standard telemetry.
     let battery_state: Arc<Mutex<Option<BatteryPacket>>> = Arc::new(Mutex::new(None));
 
+    // Shared latest damage snapshot and a Notify to trigger an immediate
+    // CRSF damage frame when damage state changes.
+    let damage_state: Arc<Mutex<Option<DamagePacket>>> = Arc::new(Mutex::new(None));
+    let damage_notify: Arc<Notify> = Arc::new(Notify::new());
+
     // simstate-bridge UDP listener: forwards raw bytes to the corresponding
     // Zenoh topic and updates the shared battery snapshot.
     let simstate_sock = UdpSocket::bind(args.simstate_bind).await?;
     info!("Bridge: simstate-bridge UDP on {}", args.simstate_bind);
     {
         let battery_state = battery_state.clone();
+        let damage_state = damage_state.clone();
+        let damage_notify = damage_notify.clone();
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
             loop {
@@ -423,8 +432,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     Ok((len, _addr)) => {
                         let payload = &buf[..len];
                         match simstate::parse_packet(payload) {
-                            Ok(SimstatePacket::Damage(_)) => {
+                            Ok(SimstatePacket::Damage(dmg)) => {
                                 counter!("simstate.damage.rx").increment(1);
+                                // Check if damage values actually changed.
+                                let changed = {
+                                    let mut guard = damage_state.lock().await;
+                                    let changed = guard
+                                        .as_ref()
+                                        .map(|prev| prev.damage != dmg.damage || prev.flags != dmg.flags)
+                                        .unwrap_or(true);
+                                    *guard = Some(dmg);
+                                    changed
+                                };
+                                if changed {
+                                    damage_notify.notify_one();
+                                }
                                 if let Err(e) = damage_publisher.put(payload).await {
                                     warn!("Failed to publish damage: {}", e);
                                 }
@@ -491,44 +513,80 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "MotorRPM".to_string(),
     ];
 
-    // Task: Receive raw telemetry from bridge, convert to CRSF, publish
+    // Task: Receive raw telemetry from bridge, convert to CRSF, publish.
+    // Also listens for damage-change notifications to send an immediate
+    // damage frame, and includes a 1 Hz damage heartbeat.
     let crsf_tel_pub = crsf_tel_publisher;
     let crsf_battery_state = battery_state.clone();
+    let crsf_damage_state = damage_state.clone();
+    let crsf_damage_notify = damage_notify.clone();
     tokio::spawn(async move {
         let mut next_send = tokio::time::Instant::now();
+        let mut next_damage_heartbeat = tokio::time::Instant::now();
+
+        /// Publish a single CRSF frame, logging and counting on success.
+        async fn send_frame(
+            pub_: &zenoh::pubsub::Publisher<'_>,
+            pkt: &[u8],
+        ) {
+            trace!("tx crsf tel {} bytes", pkt.len());
+            if let Err(e) = pub_.put(pkt).await {
+                warn!("Failed to publish CRSF telem: {}", e);
+            } else {
+                counter!("input.telemetry.tx").increment(1);
+            }
+        }
+
         loop {
-            match tel_subscriber.recv_async().await {
-                Ok(sample) => {
-                    let payload = sample.payload().to_bytes();
-                    trace!("rx tel {} bytes", payload.len());
-                    counter!("input.telemetry.rx").increment(1);
-                    let now = tokio::time::Instant::now();
-                    if now >= next_send {
-                        if let Ok(packet) =
-                            telemetry::parse_packet(&payload, &config_format)
-                        {
-                            // Snapshot the latest LFBT data; if present and
-                            // valid, generate_crsf_telemetry will use it for
-                            // BatterySensor (full voltage/current/mAh/%) and
-                            // emit a Voltages packet alongside.
-                            let bat_snapshot = crsf_battery_state.lock().await.clone();
-                            let crsf_packets =
-                                crsf_tx::generate_crsf_telemetry(&packet, bat_snapshot.as_ref());
-                            for pkt in crsf_packets {
-                                trace!("tx crsf tel {} bytes", pkt.len());
-                                if let Err(e) = crsf_tel_pub.put(pkt.as_slice()).await {
-                                    warn!("Failed to publish CRSF telem: {}", e);
-                                } else {
-                                    counter!("input.telemetry.tx").increment(1);
+            tokio::select! {
+                // Normal telemetry path: rate-limited to TELEMETRY_INTERVAL.
+                result = tel_subscriber.recv_async() => {
+                    match result {
+                        Ok(sample) => {
+                            let payload = sample.payload().to_bytes();
+                            trace!("rx tel {} bytes", payload.len());
+                            counter!("input.telemetry.rx").increment(1);
+                            let now = tokio::time::Instant::now();
+                            if now >= next_send {
+                                if let Ok(packet) =
+                                    telemetry::parse_packet(&payload, &config_format)
+                                {
+                                    let bat_snapshot = crsf_battery_state.lock().await.clone();
+                                    let crsf_packets =
+                                        crsf_tx::generate_crsf_telemetry(&packet, bat_snapshot.as_ref());
+                                    for pkt in &crsf_packets {
+                                        send_frame(&crsf_tel_pub, pkt).await;
+                                    }
+
+                                    // Include damage heartbeat at 1 Hz alongside
+                                    // the normal telemetry batch.
+                                    if now >= next_damage_heartbeat {
+                                        let dmg_snapshot = crsf_damage_state.lock().await.clone();
+                                        if let Some(frame) = dmg_snapshot.and_then(|d| crsf_custom::build_damage_packet(&d)) {
+                                            send_frame(&crsf_tel_pub, &frame).await;
+                                        }
+                                        next_damage_heartbeat = now + DAMAGE_HEARTBEAT_INTERVAL;
+                                    }
+
+                                    next_send = now + TELEMETRY_INTERVAL;
                                 }
                             }
-                            next_send = now + TELEMETRY_INTERVAL;
+                        }
+                        Err(e) => {
+                            warn!("Telemetry subscriber error: {}", e);
+                            break;
                         }
                     }
                 }
-                Err(e) => {
-                    warn!("Telemetry subscriber error: {}", e);
-                    break;
+
+                // Immediate damage path: fires when damage state changes.
+                _ = crsf_damage_notify.notified() => {
+                    let dmg_snapshot = crsf_damage_state.lock().await.clone();
+                    if let Some(frame) = dmg_snapshot.and_then(|d| crsf_custom::build_damage_packet(&d)) {
+                        send_frame(&crsf_tel_pub, &frame).await;
+                    }
+                    // Reset heartbeat timer so we don't double-send.
+                    next_damage_heartbeat = tokio::time::Instant::now() + DAMAGE_HEARTBEAT_INTERVAL;
                 }
             }
         }

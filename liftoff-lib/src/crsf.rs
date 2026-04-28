@@ -1,3 +1,4 @@
+use crate::crsf_custom;
 use crc::{CRC_8_DVB_S2, Crc};
 use num_enum::TryFromPrimitive;
 
@@ -29,6 +30,9 @@ pub enum PacketType {
     ConfigRead = 0x2C,
     ConfigWrite = 0x2D,
     RadioId = 0x3A,
+    /// Custom extended frame for per-rotor damage telemetry.
+    /// Unallocated in the CRSF spec; decoded by a LUA script on EdgeTX.
+    Damage = 0x42,
 }
 
 /// CRSF device addresses. These double as sync byte.
@@ -249,6 +253,9 @@ pub struct RcChannelsPacked {
     pub channels: [u16; 16],
 }
 
+/// Re-export so the rest of the crate can use `crsf::Damage`.
+pub use crate::crsf_custom::Damage;
+
 #[derive(Debug, Clone)]
 pub enum CrsfPacket {
     Attitude(Attitude),
@@ -261,6 +268,7 @@ pub enum CrsfPacket {
     Rpm(Rpm),
     Voltages(Voltages),
     RcChannelsPacked(RcChannelsPacked),
+    Damage(Damage),
     Unknown(PacketType), // Keep Unknown for parsing existing unknown packets
 }
 
@@ -414,6 +422,10 @@ pub fn build_packet(address: u8, packet: &CrsfPacket) -> Option<Vec<u8>> {
             frame.push(PacketType::RcChannelsPacked as u8);
             frame.extend_from_slice(&pack_channels(&channels.channels)?);
         }
+        CrsfPacket::Damage(dmg) => {
+            frame.push(PacketType::Damage as u8);
+            crsf_custom::build_damage_payload(&mut frame, dmg)?;
+        }
         CrsfPacket::Unknown(_pt) => {
             // Cannot build unknown packet without data
             return None;
@@ -551,6 +563,10 @@ pub fn parse_packet(frame: &[u8]) -> Option<CrsfPacket> {
         PacketType::RcChannelsPacked => {
             let channels = unpack_channels(data)?;
             Some(CrsfPacket::RcChannelsPacked(RcChannelsPacked { channels }))
+        }
+        PacketType::Damage => {
+            let dmg = crsf_custom::parse_damage_payload(data)?;
+            Some(CrsfPacket::Damage(dmg))
         }
         _ => Some(CrsfPacket::Unknown(packet_type)),
     }
@@ -1003,4 +1019,5 @@ mod tests {
         let built = build_packet(SOURCE_ADDRESS, &packet);
         assert_eq!(built, None);
     }
+
 }
