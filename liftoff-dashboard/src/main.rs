@@ -32,6 +32,8 @@ mod theme {
     pub const BG_PANEL: Color = Color::Rgb(0x1c, 0x17, 0x1f);
     /// Slightly raised element background (selected list rows etc.) — `lav4`.
     pub const BG_ELEMENT: Color = Color::Rgb(0x25, 0x20, 0x25);
+    /// Inactive-pane marker fg — slightly darker than `BG_PANEL` — `lav3`.
+    pub const MARKER_INACTIVE: Color = Color::Rgb(0x0f, 0x0c, 0x11);
 
     // Foreground text.
     /// Primary readable body text — `lav15`.
@@ -68,28 +70,26 @@ mod theme {
 /// them — the terminal default background shows through and produces an
 /// "empty space" gutter, the OpenCode-style separator.
 fn panel_block<'a>(title: &'a str, active: bool) -> Block<'a> {
-    let (marker, marker_style, title_style) = if active {
-        (
-            "▎",
-            Style::default().fg(theme::PRIMARY).bg(theme::BG_PANEL),
-            Style::default()
-                .fg(theme::PRIMARY)
-                .bg(theme::BG_PANEL)
-                .add_modifier(Modifier::BOLD),
-        )
+    // Both states render the same `▎` glyph in the title row so the title
+    // stays vertically aligned; only the marker colour differs.
+    let (marker_fg, title_fg, title_modifier) = if active {
+        (theme::PRIMARY, theme::PRIMARY, Modifier::BOLD)
     } else {
-        (
-            " ",
-            Style::default().fg(theme::TEXT_DIM).bg(theme::BG_PANEL),
-            Style::default()
-                .fg(theme::TEXT_MUTED)
-                .bg(theme::BG_PANEL),
-        )
+        (theme::MARKER_INACTIVE, theme::TEXT_MUTED, Modifier::empty())
     };
 
     let title_line = Line::from(vec![
-        Span::styled(format!(" {marker}"), marker_style),
-        Span::styled(format!(" {title} "), title_style),
+        Span::styled(
+            " ▎",
+            Style::default().fg(marker_fg).bg(theme::BG_PANEL),
+        ),
+        Span::styled(
+            format!(" {title} "),
+            Style::default()
+                .fg(title_fg)
+                .bg(theme::BG_PANEL)
+                .add_modifier(title_modifier),
+        ),
     ]);
 
     Block::default()
@@ -309,7 +309,7 @@ struct Dashboard {
 
 impl Dashboard {
     fn new() -> Self {
-        let alt_graph = Graph::new("Altitude", "Meters", vec![
+        let alt_graph = Graph::new("Altitude", "m", vec![
             Series::new("GPS Alt", theme::SERIES_BLUE),
         ]);
 
@@ -323,7 +323,7 @@ impl Dashboard {
             Series::new("Remaining (%)", theme::SERIES_PURPLE),
         ]);
 
-        let attitude_graph = Graph::new("Attitude", "Degrees", vec![
+        let attitude_graph = Graph::new("Attitude", "deg", vec![
             Series::new("Pitch", theme::SERIES_YELLOW),
             Series::new("Roll", theme::SERIES_GREEN),
             Series::new("Yaw", theme::SERIES_BLUE),
@@ -737,8 +737,12 @@ fn draw_graph(f: &mut Frame, area: Rect, graph: &mut Graph, active: bool) {
         .add_modifier(Modifier::BOLD);
 
     let chart = Chart::new(datasets)
-        // Let the chart inherit the panel's background; the panel block was
-        // just rendered, painting BG_PANEL across the whole area.
+        // Reset the chart area to the terminal default background so the
+        // axis labels and unit markers (km/h, "now", etc.) appear over the
+        // same transparent backdrop as the plotted lines.
+        .style(Style::default().bg(Color::Reset))
+        // Hide the auto-rendered dataset-name legend (we have our own).
+        .legend_position(None)
         .x_axis(
             Axis::default()
                 .title(Span::styled("Time", Style::default().fg(theme::TEXT_DIM)))
