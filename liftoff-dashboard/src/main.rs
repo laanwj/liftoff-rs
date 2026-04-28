@@ -8,13 +8,96 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Axis, Block, Borders, Chart, Dataset, List, ListItem, ListState, Paragraph,
+    Axis, Block, Borders, Chart, Dataset, List, ListItem, ListState, Padding, Paragraph,
 };
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use zenoh::Config;
+
+// ---------------------------------------------------------------------------
+// Theme — colours mirror the OpenCode "lavendermod" theme.
+// ---------------------------------------------------------------------------
+//
+// Visual style: panes are rendered as filled rectangles with a slightly
+// elevated background colour (`BG_PANEL`); they are separated from each other
+// by blank rows/columns where the terminal's own background shows through
+// (we never paint a global background, so the gaps appear empty).
+mod theme {
+    use ratatui::style::Color;
+
+    // Panel surfaces.
+    /// Panel/pane background — `lav1`.
+    pub const BG_PANEL: Color = Color::Rgb(0x1c, 0x17, 0x1f);
+    /// Slightly raised element background (selected list rows etc.) — `lav4`.
+    pub const BG_ELEMENT: Color = Color::Rgb(0x25, 0x20, 0x25);
+
+    // Foreground text.
+    /// Primary readable body text — `lav15`.
+    pub const TEXT: Color = Color::Rgb(0xdf, 0xb0, 0xff);
+    /// Secondary, label-ish text — `lav10`.
+    pub const TEXT_MUTED: Color = Color::Rgb(0x88, 0x6f, 0x99);
+    /// Quietest text / axis lines — `lav8`.
+    pub const TEXT_DIM: Color = Color::Rgb(0x77, 0x63, 0x86);
+
+    // Brand and status accents.
+    /// `lav12` — the dominant lavender.
+    pub const PRIMARY: Color = Color::Rgb(0xa2, 0x9d, 0xf0);
+    /// `lav13` — purple accent used for keybinds and emphasis.
+    pub const ACCENT: Color = Color::Rgb(0xb6, 0x57, 0xff);
+    /// `lav19` — success / good values.
+    pub const SUCCESS: Color = Color::Rgb(0xa7, 0xda, 0x1e);
+    /// `lav20` — error / dangerous values.
+    pub const ERROR: Color = Color::Rgb(0xe6, 0x1f, 0x44);
+
+    // Series palette — chosen for visual distinction at chart marker resolution.
+    pub const SERIES_BLUE: Color = Color::Rgb(0xa2, 0x9d, 0xf0); // lav12
+    pub const SERIES_PURPLE: Color = Color::Rgb(0xb6, 0x57, 0xff); // lav13
+    pub const SERIES_PINK: Color = Color::Rgb(0xf5, 0xb0, 0xef); // lav17
+    pub const SERIES_GREEN: Color = Color::Rgb(0xa7, 0xda, 0x1e); // lav19
+    pub const SERIES_RED: Color = Color::Rgb(0xe6, 0x1f, 0x44); // lav20
+    pub const SERIES_YELLOW: Color = Color::Rgb(0xf7, 0xb8, 0x3d); // lav21
+}
+
+/// Build a borderless panel `Block` with a coloured background, an
+/// inline title and a left-edge marker (`▎`) when `active` is true.
+///
+/// The block uses `Borders::NONE`, so adjacent panels are visually separated
+/// by leaving a gap (typically one row/column of layout `spacing`) between
+/// them — the terminal default background shows through and produces an
+/// "empty space" gutter, the OpenCode-style separator.
+fn panel_block<'a>(title: &'a str, active: bool) -> Block<'a> {
+    let (marker, marker_style, title_style) = if active {
+        (
+            "▎",
+            Style::default().fg(theme::PRIMARY).bg(theme::BG_PANEL),
+            Style::default()
+                .fg(theme::PRIMARY)
+                .bg(theme::BG_PANEL)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        (
+            " ",
+            Style::default().fg(theme::TEXT_DIM).bg(theme::BG_PANEL),
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .bg(theme::BG_PANEL),
+        )
+    };
+
+    let title_line = Line::from(vec![
+        Span::styled(format!(" {marker}"), marker_style),
+        Span::styled(format!(" {title} "), title_style),
+    ]);
+
+    Block::default()
+        .borders(Borders::NONE)
+        .style(Style::default().bg(theme::BG_PANEL).fg(theme::TEXT))
+        .title(title_line)
+        .padding(Padding::new(1, 2, 1, 1))
+}
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -227,29 +310,29 @@ struct Dashboard {
 impl Dashboard {
     fn new() -> Self {
         let alt_graph = Graph::new("Altitude", "Meters", vec![
-            Series::new("GPS Alt", Color::Cyan),
+            Series::new("GPS Alt", theme::SERIES_BLUE),
         ]);
 
         let vario_graph = Graph::new("Vertical Speed", "m/s", vec![
-            Series::new("Vario", Color::Yellow),
+            Series::new("Vario", theme::SERIES_YELLOW),
         ]);
 
         let battery_graph = Graph::new("Battery", "V / A / %", vec![
-            Series::new("Voltage (V)", Color::Green),
-            Series::new("Current (A)", Color::Red),
-            Series::new("Remaining (%)", Color::Magenta),
+            Series::new("Voltage (V)", theme::SERIES_GREEN),
+            Series::new("Current (A)", theme::SERIES_RED),
+            Series::new("Remaining (%)", theme::SERIES_PURPLE),
         ]);
 
         let attitude_graph = Graph::new("Attitude", "Degrees", vec![
-            Series::new("Pitch", Color::Yellow),
-            Series::new("Roll", Color::Green),
-            Series::new("Yaw", Color::Cyan),
+            Series::new("Pitch", theme::SERIES_YELLOW),
+            Series::new("Roll", theme::SERIES_GREEN),
+            Series::new("Yaw", theme::SERIES_BLUE),
         ])
         .with_fixed_bounds([-180.0, 180.0]);
 
         let speed_graph = Graph::new("Speed", "km/h", vec![
-            Series::new("Ground", Color::LightBlue),
-            Series::new("Air", Color::LightRed),
+            Series::new("Ground", theme::SERIES_BLUE),
+            Series::new("Air", theme::SERIES_PINK),
         ]);
 
         Self {
@@ -294,7 +377,9 @@ impl Dashboard {
 }
 
 // ---------------------------------------------------------------------------
-// Damage mini-panel (reused from liftoff-damage-indicator concepts)
+// Damage mini-panel (palette intentionally preserved: red→yellow→green
+// gradient for rotor health, plus the original DarkGray / Red / White
+// override colours for no-data / killed / body states).
 // ---------------------------------------------------------------------------
 
 fn damage_color(health: f32) -> Color {
@@ -326,7 +411,7 @@ const MINI_DRONE_WIDTH: u16 = 22;
 const MINI_DRONE_HEIGHT: u16 = 13;
 
 fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
-    let block = Block::default().borders(Borders::ALL).title(" Damage ");
+    let block = panel_block("Damage", false);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -337,7 +422,11 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
     match state.damage.as_deref() {
         None | Some(&[]) => {
             let p = Paragraph::new("No data")
-                .style(Style::default().fg(Color::DarkGray))
+                .style(
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .bg(theme::BG_PANEL),
+                )
                 .alignment(Alignment::Center);
             f.render_widget(p, inner);
         }
@@ -355,19 +444,30 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
                 override_color.unwrap_or_else(|| damage_color(*dmg.get(idx).unwrap_or(&1.0)))
             };
 
-            // Status line at top
+            // Status line at top (palette unchanged from the legacy widget).
             let status_text = if state.damage_no_drone {
-                Span::styled("No drone", Style::default().fg(Color::DarkGray))
+                Span::styled(
+                    "No drone",
+                    Style::default().fg(Color::DarkGray).bg(theme::BG_PANEL),
+                )
             } else if state.damage_killed {
-                Span::styled("KILLED", Style::default().fg(Color::Red))
+                Span::styled(
+                    "KILLED",
+                    Style::default().fg(Color::Red).bg(theme::BG_PANEL),
+                )
             } else if state.damage_crashed {
-                Span::styled("CRASHED", Style::default().fg(Color::Red))
+                Span::styled(
+                    "CRASHED",
+                    Style::default().fg(Color::Red).bg(theme::BG_PANEL),
+                )
             } else {
                 let n = dmg.len().max(1) as f32;
                 let avg = dmg.iter().sum::<f32>() / n;
                 Span::styled(
                     format!("{:.0}%", avg * 100.0),
-                    Style::default().fg(damage_color(avg)),
+                    Style::default()
+                        .fg(damage_color(avg))
+                        .bg(theme::BG_PANEL),
                 )
             };
 
@@ -377,14 +477,16 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
                 let rows = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Length(1),               // status
+                        Constraint::Length(1),                 // status
                         Constraint::Length(MINI_DRONE_HEIGHT), // drone
-                        Constraint::Min(0),                  // remaining space
+                        Constraint::Min(0),                    // remaining space
                     ])
                     .split(inner);
 
                 f.render_widget(
-                    Paragraph::new(Line::from(status_text)).alignment(Alignment::Center),
+                    Paragraph::new(Line::from(status_text))
+                        .style(Style::default().bg(theme::BG_PANEL))
+                        .alignment(Alignment::Center),
                     rows[0],
                 );
 
@@ -397,7 +499,9 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
                     .split(inner);
 
                 f.render_widget(
-                    Paragraph::new(Line::from(status_text)).alignment(Alignment::Center),
+                    Paragraph::new(Line::from(status_text))
+                        .style(Style::default().bg(theme::BG_PANEL))
+                        .alignment(Alignment::Center),
                     rows[0],
                 );
 
@@ -406,16 +510,18 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
                 let front: Vec<Span> = vec![
                     Span::styled(
                         format!(" {} {:.0}%", labels[0], hp(0) * 100.0),
-                        Style::default().fg(rotor_color(0)),
+                        Style::default().fg(rotor_color(0)).bg(theme::BG_PANEL),
                     ),
-                    Span::raw("  "),
+                    Span::styled("  ", Style::default().bg(theme::BG_PANEL)),
                     Span::styled(
                         format!("{} {:.0}% ", labels[1], hp(1) * 100.0),
-                        Style::default().fg(rotor_color(1)),
+                        Style::default().fg(rotor_color(1)).bg(theme::BG_PANEL),
                     ),
                 ];
                 f.render_widget(
-                    Paragraph::new(Line::from(front)).alignment(Alignment::Center),
+                    Paragraph::new(Line::from(front))
+                        .style(Style::default().bg(theme::BG_PANEL))
+                        .alignment(Alignment::Center),
                     rows[1],
                 );
 
@@ -423,16 +529,18 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
                     let back: Vec<Span> = vec![
                         Span::styled(
                             format!(" {} {:.0}%", labels[2], hp(2) * 100.0),
-                            Style::default().fg(rotor_color(2)),
+                            Style::default().fg(rotor_color(2)).bg(theme::BG_PANEL),
                         ),
-                        Span::raw("  "),
+                        Span::styled("  ", Style::default().bg(theme::BG_PANEL)),
                         Span::styled(
                             format!("{} {:.0}% ", labels[3], hp(3) * 100.0),
-                            Style::default().fg(rotor_color(3)),
+                            Style::default().fg(rotor_color(3)).bg(theme::BG_PANEL),
                         ),
                     ];
                     f.render_widget(
-                        Paragraph::new(Line::from(back)).alignment(Alignment::Center),
+                        Paragraph::new(Line::from(back))
+                            .style(Style::default().bg(theme::BG_PANEL))
+                            .alignment(Alignment::Center),
                         rows[2],
                     );
                 }
@@ -458,7 +566,8 @@ fn render_mini_drone(
         }
         let w = (text.len() as u16).min(area.x + area.width - x);
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(text, style))),
+            Paragraph::new(Line::from(Span::styled(text, style)))
+                .style(Style::default().bg(theme::BG_PANEL)),
             Rect::new(x, y, w, 1),
         );
     };
@@ -470,27 +579,27 @@ fn render_mini_drone(
     // Row 0: front rotors
     let rc0 = rotor_color(0);
     let rc1 = rotor_color(1);
-    put(f, dx + 3, dy, "◎", Style::default().fg(rc0));
-    put(f, dx + 17, dy, "◎", Style::default().fg(rc1));
+    put(f, dx + 3, dy, "◎", Style::default().fg(rc0).bg(theme::BG_PANEL));
+    put(f, dx + 17, dy, "◎", Style::default().fg(rc1).bg(theme::BG_PANEL));
 
     // Row 1: front percentages
     let s0 = pct_str(0);
     let s1 = pct_str(1);
     let pad0 = 4u16.saturating_sub(s0.len() as u16 / 2);
     let pad1 = 17u16.saturating_sub(s1.len() as u16 / 2);
-    put(f, dx + pad0, dy + 1, &s0, Style::default().fg(rc0));
-    put(f, dx + pad1, dy + 1, &s1, Style::default().fg(rc1));
+    put(f, dx + pad0, dy + 1, &s0, Style::default().fg(rc0).bg(theme::BG_PANEL));
+    put(f, dx + pad1, dy + 1, &s1, Style::default().fg(rc1).bg(theme::BG_PANEL));
 
     // Rows 2-3: front arms (colored by attached rotor)
-    let arm0 = Style::default().fg(rc0);
-    let arm1 = Style::default().fg(rc1);
+    let arm0 = Style::default().fg(rc0).bg(theme::BG_PANEL);
+    let arm1 = Style::default().fg(rc1).bg(theme::BG_PANEL);
     put(f, dx + 6,  dy + 2, "╲", arm0);
     put(f, dx + 14, dy + 2, "╱", arm1);
     put(f, dx + 7,  dy + 3, "╲", arm0);
     put(f, dx + 13, dy + 3, "╱", arm1);
 
     // Rows 4-8: body
-    let body_style = Style::default().fg(body_color);
+    let body_style = Style::default().fg(body_color).bg(theme::BG_PANEL);
     put(f, dx + 7, dy + 4, "┌─────┐", body_style);
     put(f, dx + 7, dy + 5, "│     │", body_style);
     put(f, dx + 7, dy + 6, "│  ◉  │", body_style);
@@ -500,8 +609,8 @@ fn render_mini_drone(
     // Rows 9-10: back arms (colored by attached rotor)
     let rc2 = rotor_color(2);
     let rc3 = rotor_color(3);
-    let arm2 = Style::default().fg(rc2);
-    let arm3 = Style::default().fg(rc3);
+    let arm2 = Style::default().fg(rc2).bg(theme::BG_PANEL);
+    let arm3 = Style::default().fg(rc3).bg(theme::BG_PANEL);
     put(f, dx + 7,  dy + 9,  "╱", arm2);
     put(f, dx + 13, dy + 9,  "╲", arm3);
     put(f, dx + 6,  dy + 10, "╱", arm2);
@@ -512,12 +621,12 @@ fn render_mini_drone(
     let s3 = pct_str(3);
     let pad2 = 4u16.saturating_sub(s2.len() as u16 / 2);
     let pad3 = 17u16.saturating_sub(s3.len() as u16 / 2);
-    put(f, dx + pad2, dy + 11, &s2, Style::default().fg(rc2));
-    put(f, dx + pad3, dy + 11, &s3, Style::default().fg(rc3));
+    put(f, dx + pad2, dy + 11, &s2, Style::default().fg(rc2).bg(theme::BG_PANEL));
+    put(f, dx + pad3, dy + 11, &s3, Style::default().fg(rc3).bg(theme::BG_PANEL));
 
     // Row 12: back rotors
-    put(f, dx + 3,  dy + 12, "◎", Style::default().fg(rc2));
-    put(f, dx + 17, dy + 12, "◎", Style::default().fg(rc3));
+    put(f, dx + 3,  dy + 12, "◎", Style::default().fg(rc2).bg(theme::BG_PANEL));
+    put(f, dx + 17, dy + 12, "◎", Style::default().fg(rc3).bg(theme::BG_PANEL));
 }
 
 // ---------------------------------------------------------------------------
@@ -526,34 +635,41 @@ fn render_mini_drone(
 
 fn render_status_bar(f: &mut Frame, area: Rect, state: &TelemetryState) {
     let mut spans = Vec::new();
+    let label = |s: &str| Span::styled(s.to_string(), Style::default().fg(theme::TEXT_MUTED));
+    let value = |s: String| Span::styled(s, Style::default().fg(theme::TEXT));
 
     if !state.connected {
         spans.push(Span::styled(
             " Waiting for telemetry...",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::TEXT_DIM),
         ));
     } else {
+        spans.push(Span::raw(" "));
         if let Some(sats) = state.sats {
-            spans.push(Span::styled("SAT ", Style::default().fg(Color::DarkGray)));
+            spans.push(label("SAT "));
             spans.push(Span::styled(
                 format!("{}", sats),
-                Style::default().fg(if sats >= 6 { Color::Green } else { Color::Red }),
+                Style::default().fg(if sats >= 6 {
+                    theme::SUCCESS
+                } else {
+                    theme::ERROR
+                }),
             ));
             spans.push(Span::raw("  "));
         }
         if let Some(alt) = state.altitude {
-            spans.push(Span::styled("ALT ", Style::default().fg(Color::DarkGray)));
-            spans.push(Span::raw(format!("{:.1}m", alt)));
+            spans.push(label("ALT "));
+            spans.push(value(format!("{:.1}m", alt)));
             spans.push(Span::raw("  "));
         }
         if let Some(v) = state.voltage {
-            spans.push(Span::styled("BAT ", Style::default().fg(Color::DarkGray)));
-            spans.push(Span::raw(format!("{:.1}V", v)));
+            spans.push(label("BAT "));
+            spans.push(value(format!("{:.1}V", v)));
             spans.push(Span::raw("  "));
         }
         if let Some(hdg) = state.heading {
-            spans.push(Span::styled("HDG ", Style::default().fg(Color::DarkGray)));
-            spans.push(Span::raw(format!("{:.0}°", hdg)));
+            spans.push(label("HDG "));
+            spans.push(value(format!("{:.0}°", hdg)));
         }
     }
 
@@ -566,15 +682,31 @@ fn render_status_bar(f: &mut Frame, area: Rect, state: &TelemetryState) {
 // ---------------------------------------------------------------------------
 
 fn draw_graph(f: &mut Frame, area: Rect, graph: &mut Graph, active: bool) {
-    // Split: chart on left, legend on right.
-    let legend_width = 28u16.min(area.width * 40 / 100);
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(legend_width),
-        ])
-        .split(area);
+    // Wrap the whole graph (chart + legend) in a single themed panel.
+    let panel = panel_block(graph.label, active);
+    let inner = panel.inner(area);
+    f.render_widget(panel, area);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    // Split inner area: chart on the left, legend on the right.
+    let legend_width = 26u16
+        .min(inner.width.saturating_sub(20))
+        .max(if inner.width > 32 { 18 } else { 0 });
+    let cols = if legend_width > 0 {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20), Constraint::Length(legend_width)])
+            .spacing(2)
+            .split(inner)
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0)])
+            .split(inner)
+    };
 
     let bounds = graph.bounds();
     let window = graph.window;
@@ -599,60 +731,45 @@ fn draw_graph(f: &mut Frame, area: Rect, graph: &mut Graph, active: bool) {
         })
         .collect();
 
-    let border_style = if active {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+    let axis_style = Style::default().fg(theme::TEXT_DIM);
+    let label_style = Style::default()
+        .fg(theme::TEXT_MUTED)
+        .add_modifier(Modifier::BOLD);
 
     let chart = Chart::new(datasets)
-        .block(
-            Block::default()
-                .title(Span::styled(
-                    graph.label,
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ))
-                .borders(Borders::ALL)
-                .border_style(border_style),
-        )
+        // Let the chart inherit the panel's background; the panel block was
+        // just rendered, painting BG_PANEL across the whole area.
         .x_axis(
             Axis::default()
-                .title("Time")
-                .style(Style::default().fg(Color::Gray))
+                .title(Span::styled("Time", Style::default().fg(theme::TEXT_DIM)))
+                .style(axis_style)
                 .labels(vec![
-                    Span::styled(
-                        format!("t-{}", window),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        "now".to_string(),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(format!("t-{}", window), label_style),
+                    Span::styled("now".to_string(), label_style),
                 ])
                 .bounds([0.0, window as f64]),
         )
         .y_axis(
             Axis::default()
-                .title(graph.y_label)
-                .style(Style::default().fg(Color::Gray))
+                .title(Span::styled(
+                    graph.y_label,
+                    Style::default().fg(theme::TEXT_DIM),
+                ))
+                .style(axis_style)
                 .labels(vec![
-                    Span::styled(
-                        format!("{:.1}", bounds[0]),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("{:.1}", bounds[1]),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(format!("{:.1}", bounds[0]), label_style),
+                    Span::styled(format!("{:.1}", bounds[1]), label_style),
                 ])
                 .bounds(bounds),
         );
 
     f.render_widget(chart, cols[0]);
 
-    // Legend panel
+    if cols.len() < 2 {
+        return;
+    }
+
+    // Legend list — themed, no inner border, lives within the same panel.
     let rows: Vec<ListItem> = graph
         .series
         .iter()
@@ -663,25 +780,29 @@ fn draw_graph(f: &mut Frame, area: Rect, graph: &mut Graph, active: bool) {
             };
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!("{:<16}", s.name),
+                    format!("{:<14}", s.name),
                     Style::default().fg(s.color),
                 ),
-                Span::styled(val, Style::default().fg(s.color)),
+                Span::styled(
+                    val,
+                    Style::default()
+                        .fg(s.color)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]))
         })
         .collect();
 
     let list = List::new(rows)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border_style)
-                .title("Values"),
+        .style(
+            Style::default()
+                .bg(theme::BG_PANEL)
+                .fg(theme::TEXT),
         )
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
-                .fg(Color::White)
+                .bg(theme::BG_ELEMENT)
+                .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -691,35 +812,36 @@ fn draw_graph(f: &mut Frame, area: Rect, graph: &mut Graph, active: bool) {
 fn draw(f: &mut Frame, dashboard: &mut Dashboard, state: &TelemetryState) {
     let size = f.area();
 
-    // Top-level layout: status bar (1), graphs area, bottom help bar (1), damage panel
+    // Top-level vertical layout. We use `.spacing(1)` to leave a single empty
+    // row of terminal background between major regions, so the panes appear
+    // as discrete coloured tiles separated by gutters.
     let main_rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // status bar
-            Constraint::Min(10),   // graphs
-            Constraint::Length(1),  // help bar
+            Constraint::Length(1), // status bar
+            Constraint::Min(10),   // content
+            Constraint::Length(1), // help bar
         ])
+        .spacing(1)
         .split(size);
 
-    // Status bar
+    // Status bar (no panel — plain text on the terminal background).
     render_status_bar(f, main_rows[0], state);
 
-    // Graphs area: split into main charts + right sidebar (damage)
+    // Content row: graphs on the left, optional damage panel on the right.
     let has_damage = state.damage.is_some();
     let content_area = if has_damage {
-        // +2 for border
-        let sidebar_w = MINI_DRONE_WIDTH + 2;
+        let sidebar_w = MINI_DRONE_WIDTH + 4; // panel padding (2) on each side
         let cols = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(40),
-                Constraint::Length(sidebar_w),
-            ])
+            .constraints([Constraint::Min(40), Constraint::Length(sidebar_w)])
+            .spacing(1) // empty column gutter between panels
             .split(main_rows[1]);
 
-        // Tight damage panel: only as tall as needed, top-aligned
-        // +2 border + 1 status + MINI_DRONE_HEIGHT
-        let panel_h = (MINI_DRONE_HEIGHT + 3).min(cols[1].height);
+        // Tight damage panel: only as tall as needed, top-aligned.
+        // Block has: 1 row title + 1 row top padding + 1 status + diagram +
+        //            1 row bottom padding.
+        let panel_h = (MINI_DRONE_HEIGHT + 4).min(cols[1].height);
         let damage_rect = Rect::new(cols[1].x, cols[1].y, cols[1].width, panel_h);
         render_damage_mini(f, damage_rect, state);
 
@@ -728,7 +850,7 @@ fn draw(f: &mut Frame, dashboard: &mut Dashboard, state: &TelemetryState) {
         main_rows[1]
     };
 
-    // Stack graphs vertically
+    // Stack graph panels vertically with single-row gutters between them.
     let n = dashboard.graphs.len();
     let constraints: Vec<Constraint> = (0..n)
         .map(|i| {
@@ -743,6 +865,7 @@ fn draw(f: &mut Frame, dashboard: &mut Dashboard, state: &TelemetryState) {
     let graph_areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
+        .spacing(1)
         .split(content_area);
 
     for (i, area) in graph_areas.iter().enumerate() {
@@ -750,18 +873,21 @@ fn draw(f: &mut Frame, dashboard: &mut Dashboard, state: &TelemetryState) {
         draw_graph(f, *area, &mut dashboard.graphs[i], active);
     }
 
-    // Help bar
+    // Help bar at the bottom — keys highlighted in the accent colour.
+    let key = |s: &str| Span::styled(s.to_string(), Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD));
+    let desc = |s: &str| Span::styled(s.to_string(), Style::default().fg(theme::TEXT_MUTED));
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" Tab", Style::default().fg(Color::Cyan)),
-        Span::raw(": graph  "),
-        Span::styled("↑↓", Style::default().fg(Color::Cyan)),
-        Span::raw(": series  "),
-        Span::styled("+/-", Style::default().fg(Color::Cyan)),
-        Span::raw(": zoom  "),
-        Span::styled("Esc", Style::default().fg(Color::Cyan)),
-        Span::raw(": deselect  "),
-        Span::styled("q", Style::default().fg(Color::Cyan)),
-        Span::raw(": quit"),
+        Span::raw(" "),
+        key("Tab"),
+        desc(" graph  "),
+        key("↑↓"),
+        desc(" series  "),
+        key("+/-"),
+        desc(" zoom  "),
+        key("Esc"),
+        desc(" deselect  "),
+        key("q"),
+        desc(" quit"),
     ]));
     f.render_widget(help, main_rows[2]);
 }
