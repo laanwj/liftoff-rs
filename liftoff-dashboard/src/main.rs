@@ -1,7 +1,6 @@
 use clap::Parser;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use liftoff_lib::crsf::{self, CrsfPacket};
-use liftoff_lib::simstate::{self, BatteryPacket};
 use liftoff_lib::topics;
 use log::{info, warn};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -206,13 +205,12 @@ struct TelemetryState {
     sats: Option<u8>,
     /// Heading (deg).
     heading: Option<f64>,
-    /// Simstate damage per rotor.
-    damage: Option<[f32; 4]>,
+    /// Per-rotor health from CRSF damage frame (0x42).
+    /// Values are in [0.0, 1.0] where 1.0 = fully healthy.
+    damage: Option<Vec<f32>>,
     damage_killed: bool,
     damage_crashed: bool,
     damage_no_drone: bool,
-    /// Simstate battery (detailed).
-    sim_battery: Option<BatteryPacket>,
     /// Whether we've received anything at all.
     connected: bool,
 }
@@ -336,8 +334,8 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
         return;
     }
 
-    match state.damage {
-        None => {
+    match state.damage.as_deref() {
+        None | Some(&[]) => {
             let p = Paragraph::new("No data")
                 .style(Style::default().fg(Color::DarkGray))
                 .alignment(Alignment::Center);
@@ -353,7 +351,9 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
             };
 
             let body_color = override_color.unwrap_or(Color::White);
-            let rotor_color = |idx: usize| override_color.unwrap_or_else(|| damage_color(dmg[idx]));
+            let rotor_color = |idx: usize| {
+                override_color.unwrap_or_else(|| damage_color(*dmg.get(idx).unwrap_or(&1.0)))
+            };
 
             // Status line at top
             let status_text = if state.damage_no_drone {
@@ -363,7 +363,8 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
             } else if state.damage_crashed {
                 Span::styled("CRASHED", Style::default().fg(Color::Red))
             } else {
-                let avg = dmg.iter().sum::<f32>() / 4.0;
+                let n = dmg.len().max(1) as f32;
+                let avg = dmg.iter().sum::<f32>() / n;
                 Span::styled(
                     format!("{:.0}%", avg * 100.0),
                     Style::default().fg(damage_color(avg)),
@@ -387,7 +388,7 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
                     rows[0],
                 );
 
-                render_mini_drone(f, rows[1], &dmg, rotor_color, body_color);
+                render_mini_drone(f, rows[1], dmg, rotor_color, body_color);
             } else {
                 // Fallback: compact text layout
                 let rows = Layout::default()
@@ -401,14 +402,15 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
                 );
 
                 let labels = ["LF", "RF", "LB", "RB"];
+                let hp = |i: usize| dmg.get(i).copied().unwrap_or(1.0);
                 let front: Vec<Span> = vec![
                     Span::styled(
-                        format!(" {} {:.0}%", labels[0], dmg[0] * 100.0),
+                        format!(" {} {:.0}%", labels[0], hp(0) * 100.0),
                         Style::default().fg(rotor_color(0)),
                     ),
                     Span::raw("  "),
                     Span::styled(
-                        format!("{} {:.0}% ", labels[1], dmg[1] * 100.0),
+                        format!("{} {:.0}% ", labels[1], hp(1) * 100.0),
                         Style::default().fg(rotor_color(1)),
                     ),
                 ];
@@ -420,12 +422,12 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
                 if rows.len() > 2 {
                     let back: Vec<Span> = vec![
                         Span::styled(
-                            format!(" {} {:.0}%", labels[2], dmg[2] * 100.0),
+                            format!(" {} {:.0}%", labels[2], hp(2) * 100.0),
                             Style::default().fg(rotor_color(2)),
                         ),
                         Span::raw("  "),
                         Span::styled(
-                            format!("{} {:.0}% ", labels[3], dmg[3] * 100.0),
+                            format!("{} {:.0}% ", labels[3], hp(3) * 100.0),
                             Style::default().fg(rotor_color(3)),
                         ),
                     ];
@@ -442,7 +444,7 @@ fn render_damage_mini(f: &mut Frame, area: Rect, state: &TelemetryState) {
 fn render_mini_drone(
     f: &mut Frame,
     area: Rect,
-    dmg: &[f32; 4],
+    dmg: &[f32],
     rotor_color: impl Fn(usize) -> Color,
     body_color: Color,
 ) {
@@ -462,7 +464,7 @@ fn render_mini_drone(
     };
 
     let pct_str = |idx: usize| -> String {
-        format!("{:.0}%", dmg[idx] * 100.0)
+        format!("{:.0}%", dmg.get(idx).copied().unwrap_or(1.0) * 100.0)
     };
 
     // Row 0: front rotors
@@ -803,43 +805,19 @@ fn process_crsf_frame(payload: &[u8], state: &Arc<RwLock<TelemetryState>>) {
         CrsfPacket::Rpm(rpm) => {
             st.rpms = Some(rpm.rpms);
         }
+        CrsfPacket::Damage(dmg) => {
+            let health: Vec<f32> = dmg
+                .health
+                .iter()
+                .map(|&h| (h as f32 / 10000.0).clamp(0.0, 1.0))
+                .collect();
+            st.damage = Some(health);
+            st.damage_killed = dmg.flags & 0x01 != 0;
+            st.damage_crashed = dmg.flags & 0x02 != 0;
+            st.damage_no_drone = dmg.flags & 0x04 != 0;
+        }
         _ => {}
     }
-}
-
-fn process_damage(payload: &[u8], state: &Arc<RwLock<TelemetryState>>) {
-    let Ok(pkt) = simstate::parse_damage(payload) else {
-        return;
-    };
-    let Ok(mut st) = state.write() else {
-        return;
-    };
-    st.connected = true;
-    let mut dmg = [1.0_f32; 4];
-    for (i, val) in pkt.damage.iter().enumerate().take(4) {
-        dmg[i] = val.clamp(0.0, 1.0);
-    }
-    st.damage = Some(dmg);
-    st.damage_killed = pkt.killed();
-    st.damage_crashed = pkt.crashed();
-    st.damage_no_drone = pkt.no_drone();
-}
-
-fn process_battery(payload: &[u8], state: &Arc<RwLock<TelemetryState>>) {
-    let Ok(pkt) = simstate::parse_battery(payload) else {
-        return;
-    };
-    let Ok(mut st) = state.write() else {
-        return;
-    };
-    st.connected = true;
-    if pkt.has_data() {
-        // Prefer the more detailed simstate battery data when available.
-        st.voltage = Some(pkt.voltage as f64);
-        st.current = Some(pkt.current_amps as f64);
-        st.battery_pct = Some(pkt.percentage as f64 * 100.0);
-    }
-    st.sim_battery = Some(pkt);
 }
 
 // ---------------------------------------------------------------------------
@@ -876,50 +854,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     Err(e) => {
                         warn!("CRSF telemetry subscriber error: {}", e);
-                        break;
-                    }
-                }
-            }
-        });
-    }
-
-    // Subscribe to damage
-    {
-        let topic = topics::topic(&args.zenoh_prefix, topics::DAMAGE);
-        info!("Subscribing to: {}", topic);
-        let subscriber = session.declare_subscriber(&topic).await?;
-        let state = state.clone();
-        tokio::spawn(async move {
-            loop {
-                match subscriber.recv_async().await {
-                    Ok(sample) => {
-                        let payload = sample.payload().to_bytes();
-                        process_damage(&payload, &state);
-                    }
-                    Err(e) => {
-                        warn!("Damage subscriber error: {}", e);
-                        break;
-                    }
-                }
-            }
-        });
-    }
-
-    // Subscribe to battery (simstate)
-    {
-        let topic = topics::topic(&args.zenoh_prefix, topics::BATTERY);
-        info!("Subscribing to: {}", topic);
-        let subscriber = session.declare_subscriber(&topic).await?;
-        let state = state.clone();
-        tokio::spawn(async move {
-            loop {
-                match subscriber.recv_async().await {
-                    Ok(sample) => {
-                        let payload = sample.payload().to_bytes();
-                        process_battery(&payload, &state);
-                    }
-                    Err(e) => {
-                        warn!("Battery subscriber error: {}", e);
                         break;
                     }
                 }
