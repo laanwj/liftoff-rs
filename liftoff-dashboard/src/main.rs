@@ -274,6 +274,8 @@ struct TelemetryState {
     current: Option<f64>,
     /// CRSF battery remaining (%).
     battery_pct: Option<f64>,
+    /// CRSF battery accumulated charge drawn (mAh).
+    mah_drawn: Option<u32>,
     /// CRSF attitude (pitch, roll, yaw) in degrees.
     pitch: Option<f64>,
     roll: Option<f64>,
@@ -662,10 +664,20 @@ fn render_status_bar(f: &mut Frame, area: Rect, state: &TelemetryState) {
             spans.push(value(format!("{:.1}m", alt)));
             spans.push(Span::raw("  "));
         }
-        if let Some(v) = state.voltage {
+        if state.voltage.is_some() || state.battery_pct.is_some() || state.mah_drawn.is_some() {
             spans.push(label("BAT "));
-            spans.push(value(format!("{:.1}V", v)));
-            spans.push(Span::raw("  "));
+            if let Some(v) = state.voltage {
+                spans.push(value(format!("{:.1}V", v)));
+                spans.push(Span::raw(" "));
+            }
+            if let Some(battery_pct) = state.battery_pct {
+                spans.push(value(format!("{:.0}%", battery_pct)));
+                spans.push(Span::raw(" "));
+            }
+            if let Some(mah) = state.mah_drawn {
+                spans.push(value(format!("{}mAh", mah)));
+                spans.push(Span::raw("  "));
+            }
         }
         if let Some(hdg) = state.heading {
             spans.push(label("HDG "));
@@ -922,6 +934,7 @@ fn process_crsf_frame(payload: &[u8], state: &Arc<RwLock<TelemetryState>>) {
             st.voltage = Some(bat.voltage_v());
             st.current = Some(bat.current_a());
             st.battery_pct = Some(bat.remaining as f64);
+            st.mah_drawn = Some(bat.capacity);
         }
         CrsfPacket::Attitude(att) => {
             let (p, r, y) = att.as_radians();
