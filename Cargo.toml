@@ -7,7 +7,7 @@ members = [
     "liftoff-forward",
     "liftoff-autopilot",
     "liftoff-mavlink-bridge",
-    "liftoff-dashboard",
+    "telemetry-dashboard",
     "velocidrone-input",
     "uncrashed-input",
 ]

@@ -29,7 +29,7 @@ Tools and background services for CRSF joystick, telemetry, and autopilot, to us
 - `liftoff-input`: Simulator bridge + CRSF joystick + mux. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Also bridges the optional [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md) UDP stream into Zenoh topics `damage` and `battery`, and feeds the per-cell voltage and current draw from there into CRSF telemetry. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick
 - `liftoff-autopilot`: PID autopilot with waypoint navigation. Subscribes to CRSF telemetry, publishes RC channels to `crsf/rc/autopilot`
 - `liftoff-gpsd`: gpsd emulator. Subscribes to CRSF telemetry and serves NMEA GPS sentences to clients like QGIS
-- `liftoff-dashboard`: Real-time TUI telemetry dashboard. Subscribes to CRSF telemetry Zenoh topic and renders scrolling braille line charts (altitude, vario, battery, attitude, speed) with a mini drone damage diagram in the sidebar
+- `telemetry-dashboard`: Real-time TUI telemetry dashboard. Subscribes to CRSF telemetry Zenoh topic and renders scrolling braille line charts (altitude, vario, battery, attitude, speed) with a mini drone damage diagram in the sidebar
 - [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md): BepInEx 5 Unity plugin (C#, not Rust) that exposes per-propeller damage and detailed battery telemetry — neither of which liftoff's own telemetry stream carries. It emits two UDP packet kinds (`LFDM` damage, `LFBT` battery) on a single port that `liftoff-input` consumes
 
 This project makes use of `tokio` for reliable, high-performance asynchronous I/O.
@@ -195,10 +195,10 @@ Options:
 ```
 
 ```
-$ target/release/liftoff-dashboard --help
+$ target/release/telemetry-dashboard --help
 Real-time telemetry dashboard for Liftoff
 
-Usage: liftoff-dashboard [OPTIONS]
+Usage: telemetry-dashboard [OPTIONS]
 
 Options:
       --zenoh-connect <ZENOH_CONNECT>
