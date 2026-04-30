@@ -7,7 +7,7 @@ edition = "2024"
 byteorder = "1.5"
 clap = { workspace = true }
 env_logger = { workspace = true }
-liftoff-lib = { workspace = true }
+telemetry-lib = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
 zenoh = { workspace = true }

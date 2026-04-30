@@ -1,6 +1,6 @@
 use clap::Parser;
-use liftoff_lib::crsf::{self};
-use liftoff_lib::topics;
+use telemetry_lib::crsf::{self};
+use telemetry_lib::topics;
 use log::{error, info, trace, warn};
 use metrics::{Unit, counter, describe_counter, describe_histogram, histogram};
 use metrics_exporter_tcp::TcpBuilder;

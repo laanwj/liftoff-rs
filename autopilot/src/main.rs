@@ -1,9 +1,9 @@
 mod mavlink_interface;
 
 use clap::Parser;
-use liftoff_lib::crsf::{self, CrsfPacket};
-use liftoff_lib::geo;
-use liftoff_lib::topics;
+use telemetry_lib::crsf::{self, CrsfPacket};
+use telemetry_lib::geo;
+use telemetry_lib::topics;
 use log::{debug, info, warn};
 use nalgebra::{UnitQuaternion, Vector3};
 use serde::Deserialize;
@@ -320,7 +320,7 @@ impl Controller {
 
             let base_throttle = 0.45; // Approx hover throttle
             let throttle = (base_throttle + throttle_correction).clamp(0.0, 1.0);
-            channels[2] = liftoff_lib::crsf::us_to_ticks((1000.0 + throttle * 1000.0) as u16);
+            channels[2] = telemetry_lib::crsf::us_to_ticks((1000.0 + throttle * 1000.0) as u16);
 
             debug!(
                 "ALT: current={:.2} target={:.2} err={:.2} vz={:.2} correction={:.3} throttle={:.3} ch2={}",
@@ -380,9 +380,9 @@ impl Controller {
             let yaw_cmd = self.yaw_pid.update(yaw_err, dt);
 
             // Map -1.0..1.0 to 1000..2000
-            channels[0] = liftoff_lib::crsf::us_to_ticks((1500.0 + roll_cmd * 500.0) as u16);
-            channels[1] = liftoff_lib::crsf::us_to_ticks((1500.0 - pitch_cmd * 500.0) as u16);
-            channels[3] = liftoff_lib::crsf::us_to_ticks((1500.0 + yaw_cmd * 500.0) as u16);
+            channels[0] = telemetry_lib::crsf::us_to_ticks((1500.0 + roll_cmd * 500.0) as u16);
+            channels[1] = telemetry_lib::crsf::us_to_ticks((1500.0 - pitch_cmd * 500.0) as u16);
+            channels[3] = telemetry_lib::crsf::us_to_ticks((1500.0 + yaw_cmd * 500.0) as u16);
 
             debug!(
                 "CMD: roll={:.3} pitch={:.3} yaw={:.3} => ch=[{}, {}, {}, {}]",
@@ -454,7 +454,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Ok(sample) => {
                     let payload = sample.payload().to_bytes();
                     if !payload.is_empty() {
-                        if let Some(packet) = liftoff_lib::crsf::parse_packet(&payload) {
+                        if let Some(packet) = telemetry_lib::crsf::parse_packet(&payload) {
                             let mut s = state_rx.lock().await;
 
                             match &packet {

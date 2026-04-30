@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use liftoff_lib::crsf::{self, CrsfPacket};
-use liftoff_lib::topics;
+use telemetry_lib::crsf::{self, CrsfPacket};
+use telemetry_lib::topics;
 use log::{debug, info, warn};
 use metrics::{Unit, counter, describe_counter};
 use metrics_exporter_tcp::TcpBuilder;

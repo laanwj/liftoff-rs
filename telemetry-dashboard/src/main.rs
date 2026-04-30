@@ -1,7 +1,7 @@
 use clap::Parser;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use liftoff_lib::crsf::{self, CrsfPacket};
-use liftoff_lib::topics;
+use telemetry_lib::crsf::{self, CrsfPacket};
+use telemetry_lib::topics;
 use log::{info, warn};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};

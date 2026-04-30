@@ -5,13 +5,13 @@
 //! struct). Keep that file and this one in lock-step when bumping the
 //! version.
 //!
-//! Style follows `liftoff_lib::simstate`: 4-byte ASCII tag, little-endian
+//! Style follows `telemetry_lib::simstate`: 4-byte ASCII tag, little-endian
 //! header, optional variable tail. The `UCFV` packet packs the entire
 //! per-tick telemetry in one datagram so the receiver sees a coherent
 //! snapshot (no LFDM/LFBT-style per-aspect demux).
 use byteorder::{ByteOrder, LittleEndian};
-use liftoff_lib::simstate::DamagePacket;
-use liftoff_lib::telemetry::TelemetryPacket;
+use telemetry_lib::simstate::DamagePacket;
+use telemetry_lib::telemetry::TelemetryPacket;
 
 /// Tag at offset 0..4 in every `UCFV` datagram.
 pub const TAG: &[u8; 4] = b"UCFV";
@@ -206,7 +206,7 @@ impl UcfvPacket {
     ///
     /// Coordinate convention: UE4 ships with X-forward, Y-right, Z-up; the
     /// liftoff `TelemetryPacket::position` is `[x, alt, z]` (index 1 = altitude
-    /// per `liftoff_lib::geo::coord_from_gps`). We pull UE4's vertical axis
+    /// per `telemetry_lib::geo::coord_from_gps`). We pull UE4's vertical axis
     /// (`Z_ue`) into slot 1 and let the horizontal pair (`X_ue`, `Y_ue`)
     /// sit in slots 0 and 2.
     ///
@@ -242,7 +242,7 @@ impl UcfvPacket {
         }
     }
 
-    /// Build a [`liftoff_lib::simstate::BatteryPacket`] (LFBT-style) from
+    /// Build a [`telemetry_lib::simstate::BatteryPacket`] (LFBT-style) from
     /// the raw battery fields the wire carries. Returns `None` when
     /// `HAS_BATTERY` is clear (battery sim off / data not yet valid).
     ///
@@ -253,7 +253,7 @@ impl UcfvPacket {
     /// - current_dA  = `current_amps`
     /// - capacity    = `charge_used_mah / 1000` Ah
     /// - remaining%  = (capacity_mah − used_mah) / capacity_mah
-    pub fn to_battery_packet(&self) -> Option<liftoff_lib::simstate::BatteryPacket> {
+    pub fn to_battery_packet(&self) -> Option<telemetry_lib::simstate::BatteryPacket> {
         if !self.has_battery() {
             return None;
         }
@@ -263,7 +263,7 @@ impl UcfvPacket {
         let used = self.charge_used_mah.max(0.0);
         let capacity = self.capacity_mah as f32;
         let percentage = ((capacity - used) / capacity).clamp(0.0, 1.0);
-        Some(liftoff_lib::simstate::BatteryPacket {
+        Some(telemetry_lib::simstate::BatteryPacket {
             version: 1,
             flags: 0,
             timestamp_ms: self.timestamp_us / 1_000,
@@ -276,7 +276,7 @@ impl UcfvPacket {
         })
     }
 
-    /// Build a [`DamagePacket`] (liftoff-lib's simstate damage struct) from
+    /// Build a [`DamagePacket`] (telemetry-lib's simstate damage struct) from
     /// this UCFV frame. Returns `None` when the source packet has no
     /// damage data. Consumed by `crsf_custom::build_damage_packet` to emit
     /// the 0x42 CRSF damage frame.

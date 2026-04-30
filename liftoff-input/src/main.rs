@@ -1,12 +1,12 @@
 use clap::Parser;
 use evdev::uinput::VirtualDevice;
 use evdev::{AbsoluteAxisCode, AttributeSet, InputId, KeyCode, MiscCode, UinputAbsSetup};
-use liftoff_lib::crsf::{self, CrsfPacket};
-use liftoff_lib::crsf_custom;
-use liftoff_lib::crsf_tx;
-use liftoff_lib::simstate::{self, BatteryPacket, DamagePacket, SimstatePacket};
-use liftoff_lib::telemetry::{self};
-use liftoff_lib::topics;
+use telemetry_lib::crsf::{self, CrsfPacket};
+use telemetry_lib::crsf_custom;
+use telemetry_lib::crsf_tx;
+use telemetry_lib::simstate::{self, BatteryPacket, DamagePacket, SimstatePacket};
+use telemetry_lib::telemetry::{self};
+use telemetry_lib::topics;
 use log::{error, info, trace, warn};
 use metrics::{Unit, counter, describe_counter};
 use metrics_exporter_tcp::TcpBuilder;

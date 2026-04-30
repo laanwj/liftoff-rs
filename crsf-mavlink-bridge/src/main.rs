@@ -1,5 +1,5 @@
 use clap::Parser;
-use liftoff_lib::topics;
+use telemetry_lib::topics;
 use log::{debug, info, warn};
 use std::net::SocketAddr;
 use std::sync::Arc;

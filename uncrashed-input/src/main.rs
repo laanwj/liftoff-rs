@@ -12,15 +12,15 @@
 //!    (poll rate > tick rate, no new data).
 //! 5. Otherwise: publishes liftoff-flavoured CRSF telemetry frames on
 //!    `{prefix}/crsf/telemetry` — standard frames from
-//!    `liftoff_lib::crsf_tx::generate_crsf_telemetry` plus the custom
-//!    0x42 per-prop damage frame from `liftoff_lib::crsf_custom`.
+//!    `telemetry_lib::crsf_tx::generate_crsf_telemetry` plus the custom
+//!    0x42 per-prop damage frame from `telemetry_lib::crsf_custom`.
 mod wire;
 
 use std::io::SeekFrom;
 use std::time::Duration;
 
 use clap::Parser;
-use liftoff_lib::{crsf_custom, crsf_tx, topics};
+use telemetry_lib::{crsf_custom, crsf_tx, topics};
 use log::{debug, error, info, warn};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};

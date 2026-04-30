@@ -11,8 +11,8 @@ fixed-size binary file (default `/tmp/uncrashed-telemetry.bin`,
 tick. This crate polls that file and publishes one stream onto Zenoh:
 
 - `{prefix}/crsf/telemetry` — CRSF binary frames (matches `liftoff-input`,
-  `velocidrone-input`), built via `liftoff_lib::crsf_tx::generate_crsf_telemetry`
-  plus `liftoff_lib::crsf_custom::build_damage_packet` for the per-prop
+  `velocidrone-input`), built via `telemetry_lib::crsf_tx::generate_crsf_telemetry`
+  plus `telemetry_lib::crsf_custom::build_damage_packet` for the per-prop
   damage 0x42 frame.
 
 ## Running
@@ -67,7 +67,7 @@ conversion in `wire.rs`:
 
 - divides position and velocity by 100 (cm → m),
 - maps UE4's vertical axis into liftoff's altitude slot
-  (`TelemetryPacket::position[1]`, per `liftoff_lib::geo::coord_from_gps`),
+  (`TelemetryPacket::position[1]`, per `telemetry_lib::geo::coord_from_gps`),
 - passes the attitude quaternion through unchanged.
 
 The quaternion handedness vs. liftoff/velocidrone is **empirical** — the

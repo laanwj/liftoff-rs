@@ -198,12 +198,12 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "env_logger",
- "liftoff-lib",
  "log",
  "mavlink",
  "nalgebra",
  "serde",
  "serde_json",
+ "telemetry-lib",
  "tokio",
  "zenoh",
 ]
@@ -583,10 +583,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "env_logger",
- "liftoff-lib",
  "log",
  "metrics",
  "metrics-exporter-tcp",
+ "telemetry-lib",
  "tokio",
  "tokio-serial",
  "zenoh",
@@ -599,12 +599,12 @@ dependencies = [
  "chrono",
  "clap",
  "env_logger",
- "liftoff-lib",
  "log",
  "metrics",
  "metrics-exporter-tcp",
  "serde",
  "serde_json",
+ "telemetry-lib",
  "tokio",
  "zenoh",
 ]
@@ -615,8 +615,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "env_logger",
- "liftoff-lib",
  "log",
+ "telemetry-lib",
  "tokio",
  "zenoh",
 ]
@@ -1453,25 +1453,12 @@ dependencies = [
  "clap",
  "env_logger",
  "evdev",
- "liftoff-lib",
  "log",
  "metrics",
  "metrics-exporter-tcp",
+ "telemetry-lib",
  "tokio",
  "zenoh",
-]
-
-[[package]]
-name = "liftoff-lib"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "bytes",
- "crc",
- "num_enum",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3149,11 +3136,24 @@ dependencies = [
  "clap",
  "crossterm",
  "env_logger",
- "liftoff-lib",
  "log",
  "ratatui",
+ "telemetry-lib",
  "tokio",
  "zenoh",
+]
+
+[[package]]
+name = "telemetry-lib"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "crc",
+ "num_enum",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3515,8 +3515,8 @@ dependencies = [
  "byteorder",
  "clap",
  "env_logger",
- "liftoff-lib",
  "log",
+ "telemetry-lib",
  "tokio",
  "zenoh",
 ]
@@ -3649,10 +3649,10 @@ dependencies = [
  "clap",
  "env_logger",
  "futures-util",
- "liftoff-lib",
  "log",
  "serde",
  "serde_json",
+ "telemetry-lib",
  "tokio",
  "tokio-tungstenite",
  "zenoh",

@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use clap::Parser;
 use futures_util::StreamExt;
-use liftoff_lib::crsf_tx;
-use liftoff_lib::telemetry::TelemetryPacket;
-use liftoff_lib::topics;
+use telemetry_lib::crsf_tx;
+use telemetry_lib::telemetry::TelemetryPacket;
+use telemetry_lib::topics;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -16,7 +16,7 @@ use zenoh::Config;
 /// gyro rate) over its built-in WebSocket server when both the
 /// `use-web-socket` and `web-socket-imu` toggles are enabled in the in-game
 /// settings. This binary consumes that stream, repackages it into
-/// `liftoff_lib::telemetry::TelemetryPacket`, and publishes CRSF telemetry
+/// `telemetry_lib::telemetry::TelemetryPacket`, and publishes CRSF telemetry
 /// frames on the `{prefix}/crsf/telemetry` Zenoh topic — the same topic
 /// `liftoff-input` publishes to, so the rest of the workspace
 /// (autopilot, dashboard, mavlink-bridge) consumes Velocidrone the same way
