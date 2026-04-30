@@ -8,11 +8,11 @@ liftoff-rs uses [Zenoh](https://zenoh.io) pub/sub for all inter-component commun
 LOCAL                                    CLOUD
                                          Liftoff Sim
                                            | UDP :9001
-                                         liftoff-input (bridge + joystick + mux)
+                                         liftoff-input (sim → Zenoh bridge)
                                            | liftoff/telemetry, liftoff/crsf/telemetry
 crsf-forward  <------- zenohd -------> (all topics)
   | serial                                 | liftoff/crsf/rc
-Radio TX                                 liftoff-input -> uinput -> Sim
+Radio TX                                 crsf-joystick -> uinput -> Sim
 ```
 
 ### Zenoh topics
@@ -27,10 +27,11 @@ Radio TX                                 liftoff-input -> uinput -> Sim
 
 | Binary              | Where    | Role                                              |
 |---------------------|----------|----------------------------------------------------|
-| `liftoff-input`     | Cloud    | Sim UDP bridge + CRSF joystick (uinput) + RC mux  |
-| `crsf-forward`   | Local    | Serial port (radio TX) <-> Zenoh                  |
-| `autopilot` | Local    | Autonomous flight controller                       |
-| `crsf-gpsd`      | Either   | NMEA GPS server from CRSF telemetry                |
+| `liftoff-input`     | Cloud    | Liftoff UDP bridge + simstate consumer            |
+| `crsf-joystick`     | Cloud    | CRSF RC channels → uinput virtual joystick + mux  |
+| `crsf-forward`      | Local    | Serial port (radio TX) <-> Zenoh                  |
+| `autopilot`         | Local    | Autonomous flight controller                       |
+| `crsf-gpsd`         | Either   | NMEA GPS server from CRSF telemetry                |
 
 ## Cloud server setup
 
@@ -48,8 +49,12 @@ cargo install zenohd
 # Zenoh router (UDP, listens for remote connections)
 zenohd --listen udp/0.0.0.0:7447
 
-# Input (sim UDP bridge + virtual joystick for sim)
+# Liftoff sim UDP bridge → Zenoh
 liftoff-input
+
+# Virtual joystick the sim consumes (sim-agnostic; works for Liftoff,
+# Velocidrone, Uncrashed)
+crsf-joystick
 ```
 
 All cloud-side binaries find `zenohd` automatically via local multicast scouting -- no connection flags needed.

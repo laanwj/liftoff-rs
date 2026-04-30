@@ -5,6 +5,7 @@ members = [
     "liftoff-input",
     "crsf-gpsd",
     "crsf-forward",
+    "crsf-joystick",
     "autopilot",
     "crsf-mavlink-bridge",
     "telemetry-dashboard",

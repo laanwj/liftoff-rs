@@ -1,17 +1,25 @@
+//! Liftoff-specific telemetry input.
+//!
+//! Listens for Liftoff's native UDP telemetry stream (default
+//! `127.0.0.1:9001`) and the optional `liftoff-simstate-bridge` UDP
+//! stream (default `127.0.0.1:9020`), republishes both onto Zenoh, and
+//! generates the workspace-standard CRSF telemetry frames the rest of
+//! the stack consumes.
+//!
+//! No RC channel handling — the virtual joystick lives in `crsf-joystick/`
+//! now. This binary is purely Liftoff → Zenoh; for Velocidrone or
+//! Uncrashed, run their respective `*-input` crate instead.
 use clap::Parser;
-use evdev::uinput::VirtualDevice;
-use evdev::{AbsoluteAxisCode, AttributeSet, InputId, KeyCode, MiscCode, UinputAbsSetup};
-use telemetry_lib::crsf::{self, CrsfPacket};
-use telemetry_lib::crsf_custom;
-use telemetry_lib::crsf_tx;
-use telemetry_lib::simstate::{self, BatteryPacket, DamagePacket, SimstatePacket};
-use telemetry_lib::telemetry::{self};
-use telemetry_lib::topics;
 use log::{error, info, trace, warn};
 use metrics::{Unit, counter, describe_counter};
 use metrics_exporter_tcp::TcpBuilder;
 use std::sync::Arc;
 use std::time::Duration;
+use telemetry_lib::crsf_custom;
+use telemetry_lib::crsf_tx;
+use telemetry_lib::simstate::{self, BatteryPacket, DamagePacket, SimstatePacket};
+use telemetry_lib::telemetry::{self};
+use telemetry_lib::topics;
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, Notify};
 use zenoh::Config;
@@ -52,269 +60,6 @@ struct Args {
 const TELEMETRY_INTERVAL: Duration = Duration::from_millis(100);
 const DAMAGE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
-// Axis constants
-const AXIS_MAX: u16 = 1983; // 1984 - 1
-const AXIS_MID: u16 = 992;
-const AXIS_3POS_LEFT: u16 = 592;
-const AXIS_3POS_RIGHT: u16 = 1392;
-
-struct InputState {
-    old_channels: [u16; 16],
-    device: evdev::uinput::VirtualDevice,
-}
-
-impl InputState {
-    fn new() -> std::io::Result<Self> {
-        let mut keys = AttributeSet::<KeyCode>::new();
-        for k in [
-            KeyCode::BTN_TRIGGER,
-            KeyCode::BTN_THUMB,
-            KeyCode::BTN_THUMB2,
-            KeyCode::BTN_TOP,
-            KeyCode::BTN_TOP2,
-            KeyCode::BTN_PINKIE,
-            KeyCode::BTN_BASE,
-            KeyCode::BTN_BASE2,
-            KeyCode::BTN_BASE3,
-            KeyCode::BTN_BASE4,
-            KeyCode::BTN_BASE5,
-            KeyCode::BTN_BASE6,
-            KeyCode::new(KeyCode::BTN_BASE6.code() + 1), // 0x12d
-        ] {
-            keys.insert(k);
-        }
-
-        let abs_setup = UinputAbsSetup::new(
-            AbsoluteAxisCode::ABS_X,
-            evdev::AbsInfo::new(0, 0, AXIS_MAX.into(), 7, 127, 0),
-        );
-        let abs_y = UinputAbsSetup::new(
-            AbsoluteAxisCode::ABS_Y,
-            evdev::AbsInfo::new(0, 0, AXIS_MAX.into(), 7, 127, 0),
-        );
-        let abs_z = UinputAbsSetup::new(
-            AbsoluteAxisCode::ABS_Z,
-            evdev::AbsInfo::new(0, 0, AXIS_MAX.into(), 7, 127, 0),
-        );
-        let abs_rx = UinputAbsSetup::new(
-            AbsoluteAxisCode::ABS_RX,
-            evdev::AbsInfo::new(0, 0, AXIS_MAX.into(), 7, 127, 0),
-        );
-        let abs_throttle = UinputAbsSetup::new(
-            AbsoluteAxisCode::ABS_THROTTLE,
-            evdev::AbsInfo::new(0, 0, AXIS_MAX.into(), 7, 127, 0),
-        );
-        let abs_rudder = UinputAbsSetup::new(
-            AbsoluteAxisCode::ABS_RUDDER,
-            evdev::AbsInfo::new(0, 0, AXIS_MAX.into(), 7, 127, 0),
-        );
-        let abs_wheel = UinputAbsSetup::new(
-            AbsoluteAxisCode::ABS_WHEEL,
-            evdev::AbsInfo::new(0, 0, AXIS_MAX.into(), 7, 127, 0),
-        );
-
-        let mut msc_set = AttributeSet::<MiscCode>::new();
-        msc_set.insert(MiscCode::MSC_SCAN);
-
-        let device = VirtualDevice::builder()?
-            .name("CRSF Joystick")
-            .input_id(InputId::new(evdev::BusType::BUS_USB, 0x1209, 0x4f54, 0)) // Radiomaster Pocket vendor/product
-            .with_keys(&keys)?
-            .with_absolute_axis(&abs_setup)?
-            .with_absolute_axis(&abs_y)?
-            .with_absolute_axis(&abs_z)?
-            .with_absolute_axis(&abs_rx)?
-            .with_absolute_axis(&abs_throttle)?
-            .with_absolute_axis(&abs_rudder)?
-            .with_absolute_axis(&abs_wheel)?
-            .with_msc(&msc_set)?
-            .build()?;
-
-        Ok(Self {
-            old_channels: [0xffff; 16], // Different initial value to force update
-            device,
-        })
-    }
-
-    fn update(&mut self, channels: [u16; 16]) -> std::io::Result<()> {
-        let mut events = Vec::<evdev::InputEvent>::new();
-        let dev = &mut self.device;
-        let old = self.old_channels;
-
-        // 0 AIL (ABS_X)
-        if channels[0] != old[0] {
-            events.extend(&[evdev::InputEvent::new(
-                evdev::EventType::ABSOLUTE.0,
-                AbsoluteAxisCode::ABS_X.0,
-                channels[0] as i32,
-            )]);
-        }
-        // 1 ELE (ABS_Y)
-        if channels[1] != old[1] {
-            events.extend(&[evdev::InputEvent::new(
-                evdev::EventType::ABSOLUTE.0,
-                AbsoluteAxisCode::ABS_Y.0,
-                channels[1] as i32,
-            )]);
-        }
-        // 2 THR (ABS_Z)
-        if channels[2] != old[2] {
-            events.extend(&[evdev::InputEvent::new(
-                evdev::EventType::ABSOLUTE.0,
-                AbsoluteAxisCode::ABS_Z.0,
-                channels[2] as i32,
-            )]);
-        }
-        // 3 RUD (ABS_RX)
-        if channels[3] != old[3] {
-            events.extend(&[evdev::InputEvent::new(
-                evdev::EventType::ABSOLUTE.0,
-                AbsoluteAxisCode::ABS_RX.0,
-                channels[3] as i32,
-            )]);
-        }
-
-        // 4 SD disarm/arm button(s) + ABS_THROTTLE
-        if channels[4] != old[4] {
-            let val = channels[4] as i32;
-            events.extend(&[
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_TRIGGER.0,
-                    if channels[4] < AXIS_MID { 1 } else { 0 },
-                ),
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_THUMB.0,
-                    if channels[4] >= AXIS_MID { 1 } else { 0 },
-                ),
-                evdev::InputEvent::new(
-                    evdev::EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_THROTTLE.0,
-                    val,
-                ),
-            ]);
-        }
-
-        // 5 button SE (2POS, momentary) -> BTN_THUMB2
-        if channels[5] != old[5] {
-            events.extend(&[evdev::InputEvent::new(
-                evdev::EventType::KEY.0,
-                KeyCode::BTN_THUMB2.0,
-                if channels[5] >= AXIS_MID { 1 } else { 0 },
-            )]);
-        }
-
-        // 6 S1-pot -> ABS_RUDDER
-        if channels[6] != old[6] {
-            events.extend(&[evdev::InputEvent::new(
-                evdev::EventType::ABSOLUTE.0,
-                AbsoluteAxisCode::ABS_RUDDER.0,
-                channels[6] as i32,
-            )]);
-        }
-
-        // 7 button SA (2POS, fixed) -> BTN_BASE6 / BTN_BASE6+1 + ABS_WHEEL
-        if channels[7] != old[7] {
-            let val = channels[7] as i32;
-            events.extend(&[
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_BASE6.0,
-                    if channels[7] < AXIS_MID { 1 } else { 0 },
-                ),
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::new(KeyCode::BTN_BASE6.code() + 1).0,
-                    if channels[7] >= AXIS_MID { 1 } else { 0 },
-                ),
-                evdev::InputEvent::new(
-                    evdev::EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_WHEEL.0,
-                    val,
-                ),
-            ]);
-        }
-
-        // 8: RUD trim
-        if channels[8] != old[8] {
-            events.extend(&[
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_TOP.0,
-                    if channels[8] <= AXIS_3POS_LEFT { 1 } else { 0 },
-                ),
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_TOP2.0,
-                    if channels[8] >= AXIS_3POS_RIGHT { 1 } else { 0 },
-                ),
-            ]);
-        }
-        // 9: ELE trim
-        if channels[9] != old[9] {
-            events.extend(&[
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_PINKIE.0,
-                    if channels[9] <= AXIS_3POS_LEFT { 1 } else { 0 },
-                ),
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_BASE.0,
-                    if channels[9] >= AXIS_3POS_RIGHT { 1 } else { 0 },
-                ),
-            ]);
-        }
-        // 10: THR trim
-        if channels[10] != old[10] {
-            events.extend(&[
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_BASE2.0,
-                    if channels[10] <= AXIS_3POS_LEFT { 1 } else { 0 },
-                ),
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_BASE3.0,
-                    if channels[10] >= AXIS_3POS_RIGHT {
-                        1
-                    } else {
-                        0
-                    },
-                ),
-            ]);
-        }
-        // 11: AIL trim
-        if channels[11] != old[11] {
-            events.extend(&[
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_BASE4.0,
-                    if channels[11] <= AXIS_3POS_LEFT { 1 } else { 0 },
-                ),
-                evdev::InputEvent::new(
-                    evdev::EventType::KEY.0,
-                    KeyCode::BTN_BASE5.0,
-                    if channels[11] >= AXIS_3POS_RIGHT {
-                        1
-                    } else {
-                        0
-                    },
-                ),
-            ]);
-        }
-
-        self.old_channels = channels;
-
-        if !events.is_empty() {
-            counter!("input.uinput.update").increment(1);
-            dev.emit(&events)?;
-        }
-        Ok(())
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
@@ -329,12 +74,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .expect("failed to install metrics TCP exporter");
     }
 
-    describe_counter!("input.crsf.rx", Unit::Count, "CRSF packets received");
-    describe_counter!(
-        "input.crsf.rx_rc_channels",
-        Unit::Count,
-        "CRSF RC_CHANNELS packets received"
-    );
     describe_counter!(
         "input.telemetry.rx",
         Unit::Count,
@@ -344,11 +83,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "input.telemetry.tx",
         Unit::Count,
         "CRSF telemetry packets sent"
-    );
-    describe_counter!(
-        "input.uinput.update",
-        Unit::Count,
-        "Updates to virtual input device"
     );
     describe_counter!(
         "bridge.packet.rx",
@@ -382,27 +116,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(ref endpoint) = args.zenoh_connect {
         config.insert_json5("connect/endpoints", &format!(r#"["{}"]"#, endpoint))?;
     }
-
     let session = zenoh::open(config).await?;
 
     let tel_topic = topics::topic(&args.zenoh_prefix, topics::TELEMETRY);
     let crsf_tel_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_TELEMETRY);
-    let crsf_rc_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC);
-    let crsf_rc_ap_topic = topics::topic(&args.zenoh_prefix, topics::CRSF_RC_AUTOPILOT);
     let damage_topic = topics::topic(&args.zenoh_prefix, topics::DAMAGE);
     let battery_topic = topics::topic(&args.zenoh_prefix, topics::BATTERY);
 
     info!("Subscribing to: {}", tel_topic);
     info!("Publishing on: {}", crsf_tel_topic);
-    info!("Subscribing to: {} (manual)", crsf_rc_topic);
-    info!("Subscribing to: {} (autopilot)", crsf_rc_ap_topic);
     info!("Publishing on: {} (simstate damage)", damage_topic);
     info!("Publishing on: {} (simstate battery)", battery_topic);
 
     let crsf_tel_publisher = session.declare_publisher(crsf_tel_topic).await?;
     let tel_subscriber = session.declare_subscriber(&tel_topic).await?;
-    let rc_subscriber = session.declare_subscriber(&crsf_rc_topic).await?;
-    let rc_ap_subscriber = session.declare_subscriber(&crsf_rc_ap_topic).await?;
     let damage_publisher = session.declare_publisher(damage_topic).await?;
     let battery_publisher = session.declare_publisher(battery_topic).await?;
 
@@ -496,10 +223,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
-    // Create uinput device
-    // NOTE: This requires permission to write to /dev/uinput
-    let input_state = Arc::new(Mutex::new(InputState::new()?));
-
     // Telemetry format config
     // We assume default configuration for now
     let config_format = vec![
@@ -520,7 +243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let crsf_battery_state = battery_state.clone();
     let crsf_damage_state = damage_state.clone();
     let crsf_damage_notify = damage_notify.clone();
-    tokio::spawn(async move {
+    let crsf_task = tokio::spawn(async move {
         let mut next_send = tokio::time::Instant::now();
         let mut next_damage_heartbeat = tokio::time::Instant::now();
 
@@ -592,77 +315,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
-    // Mux state: track manual radio presence and SA switch position
-    let manual_timeout = Duration::from_millis(500);
-    let mut last_manual_time: Option<tokio::time::Instant> = None;
-    let mut last_manual_ch7: u16 = 0; // SA switch, low = manual
-    let mut active_source = "none";
-
-    // Main loop: Mux between manual (crsf/rc) and autopilot (crsf/rc/autopilot) frames
-    loop {
-        let (payload, source) = tokio::select! {
-            result = rc_subscriber.recv_async() => {
-                match result {
-                    Ok(sample) => (sample.payload().to_bytes().to_vec(), "manual"),
-                    Err(e) => {
-                        error!("RC subscriber error: {}", e);
-                        break;
-                    }
-                }
-            }
-            result = rc_ap_subscriber.recv_async() => {
-                match result {
-                    Ok(sample) => (sample.payload().to_bytes().to_vec(), "autopilot"),
-                    Err(e) => {
-                        error!("RC autopilot subscriber error: {}", e);
-                        break;
-                    }
-                }
-            }
-        };
-
-        trace!("rx crsf ({}) {:02x?}", source, &*payload);
-        counter!("input.crsf.rx").increment(1);
-
-        if let Some(CrsfPacket::RcChannelsPacked(channels)) =
-            crsf::parse_packet_check(&payload)
-        {
-            counter!("input.crsf.rx_rc_channels").increment(1);
-            if channels.channels.iter().any(|&c| c > AXIS_MAX) {
-                warn!("Channel out of range: {:?}", channels.channels);
-                continue;
-            }
-
-            // Update manual tracking state
-            if source == "manual" {
-                last_manual_time = Some(tokio::time::Instant::now());
-                last_manual_ch7 = channels.channels[7];
-            }
-
-            // Determine selected source from mux state
-            let manual_active = last_manual_time
-                .map(|t| t.elapsed() < manual_timeout)
-                .unwrap_or(false);
-            let selected = if manual_active && last_manual_ch7 < AXIS_MID {
-                "manual"
-            } else {
-                "autopilot"
-            };
-
-            if active_source != selected {
-                info!("RC source switched to {}", selected);
-                active_source = selected;
-            }
-
-            // Apply frame if it matches the selected source
-            if source == selected {
-                let mut state = input_state.lock().await;
-                if let Err(e) = state.update(channels.channels) {
-                    error!("Failed to update uinput: {}", e);
-                }
-            }
-        }
-    }
+    // The CRSF generation task is the last thing keeping us alive — when
+    // it exits (telemetry subscriber error / Zenoh shutdown), so do we.
+    let _ = crsf_task.await;
 
     session.close().await?;
     Ok(())

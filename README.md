@@ -2,7 +2,7 @@
 
 Tools and background services for CRSF joystick, telemetry, and autopilot, to use a quadcopter sim in hardware-in-the-loop simulation. Services communicate over [Zenoh](https://zenoh.io/) pub/sub over UDP.
 
-Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with additional bridges for [Velocidrone](https://store.steampowered.com/app/1631290/) and [Uncrashed](https://store.steampowered.com/app/1682970/) — once any of them publishes a CRSF telemetry stream on the workspace's Zenoh topic, the rest of the stack (autopilot, dashboard, gpsd) doesn't care which sim is upstream.
+Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with additional bridges for [Velocidrone](https://store.steampowered.com/app/1631290/) and [Uncrashed](https://store.steampowered.com/app/1682970/) — once any of them publishes a CRSF telemetry stream, the rest of the stack (autopilot, dashboard, gpsd) doesn't care which sim is upstream.
 
 ```
  ┏━━━━━━━┓
@@ -28,7 +28,8 @@ Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with ad
 ```
 
 - `crsf-forward`: CRSF forwarder. Bridges CRSF RC channels and telemetry between an ELRS serial receiver and Zenoh
-- `liftoff-input`: Simulator bridge + CRSF joystick + mux. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Also bridges the optional [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md) UDP stream into Zenoh topics `damage` and `battery`, and feeds the per-cell voltage and current draw from there into CRSF telemetry. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick
+- `crsf-joystick`: Virtual joystick service. Subscribes to CRSF RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, muxes them based on radio presence and the SA switch, and emits a Linux uinput device named `CRSF Joystick` that any sim picks up as a regular controller. Sim-agnostic — the same binary works for Liftoff, Velocidrone, and Uncrashed
+- `liftoff-input`: Liftoff telemetry bridge. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Also bridges the optional [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md) UDP stream into Zenoh topics `damage` and `battery`, and feeds the per-cell voltage and current draw from there into CRSF telemetry
 - `autopilot`: PID autopilot with waypoint navigation. Subscribes to CRSF telemetry, publishes RC channels to `crsf/rc/autopilot`
 - `crsf-gpsd`: gpsd emulator. Subscribes to CRSF telemetry and serves NMEA GPS sentences to clients like QGIS
 - `telemetry-dashboard`: Real-time TUI telemetry dashboard. Subscribes to CRSF telemetry Zenoh topic and renders scrolling braille line charts (altitude, vario, battery, attitude, speed) with a mini drone damage diagram in the sidebar
@@ -161,6 +162,27 @@ Options:
 ```
 
 ```
+$ target/release/crsf-joystick --help
+Usage: crsf-joystick [OPTIONS]
+
+Options:
+      --zenoh-connect <ZENOH_CONNECT>
+          Zenoh connect endpoint (e.g. tcp/192.168.1.1:7447). Omit for peer discovery
+      --zenoh-mode <ZENOH_MODE>
+          Zenoh mode (peer or client) [default: peer]
+      --zenoh-prefix <ZENOH_PREFIX>
+          Zenoh topic prefix [default: liftoff]
+      --metrics-tcp
+          Enable metrics reporting using metrics-rs-tcp-exporter
+      --metrics-tcp-bind <METRICS_TCP_BIND>
+          Bind address for metrics-rs-tcp-exporter [default: 127.0.0.1:5004]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
+```
+
+```
 $ target/release/autopilot --help
 Usage: autopilot [OPTIONS]
 
@@ -227,19 +249,19 @@ Options:
 
 ### RC/Autopilot Mux
 
-When both `crsf-forward` (manual RC) and `autopilot` are running, `liftoff-input` acts as a mux:
+When both `crsf-forward` (manual RC) and `autopilot` are running, `crsf-joystick` acts as a mux:
 
 - **No radio connected** (no manual frame within 500ms): autopilot controls
-- **Radio connected, ch8 high**: autopilot controls
-- **Radio connected, ch8 low**: manual override
+- **Radio connected, SA switch high**: autopilot controls
+- **Radio connected, SA switch low**: manual override
 
 This allows seamless handoff between manual and autonomous flight using the SA switch on the radio.
 
-### Setting up liftoff's input
+### Setting up the in-sim controller
 
-In-game, `liftoff-input` will appear as a controller named `CRSF joystick`. Select this and calibrate it.
+In-game, `crsf-joystick` will appear as a controller named `CRSF Joystick`. Select this and calibrate it. The same binary handles input for any sim — Liftoff, Velocidrone, or Uncrashed — since it just reads CRSF RC channels off Zenoh and emits a uinput device.
 
-The RC channel values to joystick axis/button mappings are currently hard-coded in the function [InputState::update](liftoff-input/src/main.rs#L117).
+The RC channel values to joystick axis/button mappings are hard-coded in [`Joystick::update`](crsf-joystick/src/lib.rs).
 
 ## Diagnostics
 

@@ -610,6 +610,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crsf-joystick"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "evdev",
+ "log",
+ "metrics",
+ "metrics-exporter-tcp",
+ "telemetry-lib",
+ "tokio",
+ "zenoh",
+]
+
+[[package]]
 name = "crsf-mavlink-bridge"
 version = "0.1.0"
 dependencies = [
@@ -1452,7 +1467,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "env_logger",
- "evdev",
  "log",
  "metrics",
  "metrics-exporter-tcp",

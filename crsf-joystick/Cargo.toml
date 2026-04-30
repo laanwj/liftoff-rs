@@ -1,14 +1,15 @@
 [package]
-name = "liftoff-input"
+name = "crsf-joystick"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 clap = { workspace = true }
 env_logger = { workspace = true }
-telemetry-lib = { workspace = true }
+evdev = "0.13.2"
 log = { workspace = true }
-tokio = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-tcp = { workspace = true }
+telemetry-lib = { workspace = true }
+tokio = { workspace = true }
 zenoh = { workspace = true }
