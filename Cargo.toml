@@ -9,6 +9,7 @@ members = [
     "liftoff-mavlink-bridge",
     "liftoff-dashboard",
     "velocidrone-input",
+    "uncrashed-input",
 ]
 
 [workspace.dependencies]

@@ -1,0 +1,4 @@
+# Bundled LuaSocket DLLs are user-provided per the README — don't commit
+# any binaries that drift in here.
+scripts/*.dll
+scripts/socket/*.dll

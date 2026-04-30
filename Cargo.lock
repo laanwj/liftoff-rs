@@ -3509,6 +3509,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "uncrashed-input"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "clap",
+ "env_logger",
+ "liftoff-lib",
+ "log",
+ "tokio",
+ "zenoh",
+]
+
+[[package]]
 name = "unescaper"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
