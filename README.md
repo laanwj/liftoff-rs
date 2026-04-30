@@ -1,6 +1,8 @@
 # liftoff-rs
 
-Tools and background services for CRSF joystick, telemetry, and autopilot, to use the quadcopter sim "liftoff" in hardware-in-the-loop simulation. Services communicate over [Zenoh](https://zenoh.io/) pub/sub over UDP.
+Tools and background services for CRSF joystick, telemetry, and autopilot, to use a quadcopter sim in hardware-in-the-loop simulation. Services communicate over [Zenoh](https://zenoh.io/) pub/sub over UDP.
+
+Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with additional bridges for [Velocidrone](https://store.steampowered.com/app/1631290/) and [Uncrashed](https://store.steampowered.com/app/1682970/) — once any of them publishes a CRSF telemetry stream on the workspace's Zenoh topic, the rest of the stack (autopilot, dashboard, gpsd) doesn't care which sim is upstream.
 
 ```
  ┏━━━━━━━┓
@@ -31,6 +33,8 @@ Tools and background services for CRSF joystick, telemetry, and autopilot, to us
 - `liftoff-gpsd`: gpsd emulator. Subscribes to CRSF telemetry and serves NMEA GPS sentences to clients like QGIS
 - `telemetry-dashboard`: Real-time TUI telemetry dashboard. Subscribes to CRSF telemetry Zenoh topic and renders scrolling braille line charts (altitude, vario, battery, attitude, speed) with a mini drone damage diagram in the sidebar
 - [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md): BepInEx 5 Unity plugin (C#, not Rust) that exposes per-propeller damage and detailed battery telemetry — neither of which liftoff's own telemetry stream carries. It emits two UDP packet kinds (`LFDM` damage, `LFBT` battery) on a single port that `liftoff-input` consumes
+- `velocidrone-input`: Velocidrone → Zenoh bridge. Connects to Velocidrone's built-in WebSocket telemetry server, repackages each frame as CRSF telemetry on the same Zenoh topic `liftoff-input` publishes to
+- [`uncrashed-input`](uncrashed-input/README.md) + [`uncrashed-telemetry-mod`](uncrashed-telemetry-mod/README.md): Uncrashed → Zenoh bridge. The mod is a UE4SS Lua plugin that runs inside the game and writes per-tick drone state to a fixed-size IPC file via Wine's drive-Z mapping; the Rust receiver polls the file and republishes CRSF telemetry. Uncrashed exposes no native telemetry interface, so this is the only way to bring it onto Zenoh
 
 This project makes use of `tokio` for reliable, high-performance asynchronous I/O.
 
@@ -84,6 +88,14 @@ On Linux this will usually be `~/.config/unity3d/LuGus Studios/Liftoff/`. The ex
 ### Setting up liftoff-simstate-bridge (optional)
 
 To get per-propeller damage and detailed battery telemetry (current draw, per-cell voltage, mAh drawn, percentage), install the [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md) BepInEx plugin into your Liftoff install. Without it, `liftoff-input` still works — it just falls back to the voltage+percent that liftoff's standard telemetry provides, and the `damage` / `battery` Zenoh topics simply stay quiet.
+
+### Velocidrone (optional)
+
+Run [`velocidrone-input`](velocidrone-input/) instead of (or alongside) `liftoff-input`. It connects to Velocidrone's built-in WebSocket telemetry — enable both `use-web-socket` and `web-socket-imu` in the in-game settings — and publishes the same CRSF stream the rest of the stack reads.
+
+### Uncrashed (optional)
+
+Uncrashed has no native telemetry interface, so this needs a UE4SS Lua mod inside the game plus a host-side bridge. See [`uncrashed-telemetry-mod`](uncrashed-telemetry-mod/README.md) for the mod install (UE4SS v3.0.1, file-IPC over Wine's drive-Z mapping) and [`uncrashed-input`](uncrashed-input/README.md) for the receiver crate that polls the IPC file and republishes CRSF telemetry.
 
 ### Building
 
