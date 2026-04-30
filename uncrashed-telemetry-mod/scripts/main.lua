@@ -194,29 +194,22 @@ local function sample()
     end)
     if not ok_rot then log("rotation read failed: %s", tostring(err_rot)) end
 
-    -- Physics body is the `drone` USkeletalMeshComponent (lowercase,
-    -- per the CXX header dump). The capital-D `Drone` doesn't exist as
-    -- a property and trying to access it crashes UE4SS at the C++ level.
-    --
-    -- Read linear velocity via the cached `ComponentVelocity` UPROPERTY
-    -- on USceneComponent rather than via the UPrimitiveComponent
-    -- UFunction `GetPhysicsLinearVelocity(FName)` — the latter takes a
-    -- required (default) FName argument that UE4SS Lua doesn't reliably
-    -- supply, so the call resolves to a function pointer and gets
-    -- thrown back as an error.
-    local ok_vel, err_vel = pcall(function()
-        local body = pawn.drone
-        if not valid(body) then return end
-        local vel = body.ComponentVelocity
-        if vel then snap.velocity = {vel.X, vel.Y, vel.Z} end
-    end)
-    if not ok_vel then log("velocity read failed: %s", tostring(err_vel)) end
+    -- Linear velocity intentionally unread. None of the available paths
+    -- yield real values from UE4SS Lua: `ComponentVelocity` reports zero,
+    -- `GetPhysicsLinearVelocity(FName)` can't be called because of the
+    -- required FName arg, and `GetUpSpeed`/`Get Velocity km h` UFunctions
+    -- silently return nothing despite being parameterless. The receiver
+    -- differentiates `position` across ticks instead.
 
-    -- Angular velocity intentionally unread. UPrimitiveComponent's
-    -- `GetPhysicsAngularVelocityInDegrees(FName)` UFunction takes a
-    -- required FName argument that UE4SS Lua doesn't reliably supply,
-    -- and there's no cached UPROPERTY equivalent. Gyro stays at zero
-    -- in the UCFV packet.
+    -- Angular velocity from the pawn's `Angular speed drone` FRotator
+    -- UPROPERTY (line 123 of BP_FPVDrone_Pawn.hpp; spaces in the name
+    -- require bracket access). Wire stores raw (Pitch, Yaw, Roll)
+    -- order; the receiver reorders to liftoff's (pitch, roll, yaw)
+    -- convention.
+    pcall(function()
+        local ang = pawn["Angular speed drone"]
+        if ang then snap.gyro = {ang.Pitch, ang.Yaw, ang.Roll} end
+    end)
 
     -- Stick inputs from the player controller (raw, pre-curve).
     local pc = find_controller()

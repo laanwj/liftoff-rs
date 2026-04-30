@@ -89,6 +89,10 @@ pub struct UcfvPacket {
     pub velocity: [f32; 3],
     /// Body-frame angular rates, deg/s. Order: pitch, roll, yaw — to match
     /// `TelemetryPacket::gyro`.
+    /// Angular velocity in **FRotator order** (Pitch, Yaw, Roll), deg/s,
+    /// as Uncrashed's `Angular speed drone` UPROPERTY exposes it. The
+    /// receiver reorders to liftoff/CRSF's (pitch, roll, yaw) convention
+    /// in `into_telemetry`.
     pub gyro: [f32; 3],
     /// Stick inputs (throttle, yaw, pitch, roll). Range -1..1 unitless;
     /// throttle is 0..1 conventionally. Matches `TelemetryPacket::input`.
@@ -218,18 +222,20 @@ impl UcfvPacket {
             self.position[2] / 100.0, // UE Z-up → liftoff altitude slot
             self.position[1] / 100.0,
         ];
-        let vel_m = [
-            self.velocity[0] / 100.0,
-            self.velocity[2] / 100.0,
-            self.velocity[1] / 100.0,
-        ];
+
+        // Wire stores gyro as FRotator (Pitch, Yaw, Roll) deg/s; liftoff
+        // expects (pitch, roll, yaw) — swap slots 1 and 2.
+        let gyro_liftoff = [self.gyro[0], self.gyro[2], self.gyro[1]];
 
         TelemetryPacket {
             timestamp: Some(self.timestamp_us as f32 / 1_000_000.0),
             position: Some(pos_m),
             attitude: Some(self.attitude_quat),
-            velocity: Some(vel_m),
-            gyro: Some(self.gyro),
+            // Velocity is filled in by the receiver loop via position
+            // differentiation across ticks — the game exposes no usable
+            // instantaneous velocity reading.
+            velocity: None,
+            gyro: Some(gyro_liftoff),
             input: Some(self.inputs),
             battery: None,
             motor_rpm: None,
@@ -334,8 +340,8 @@ mod tests {
         for v in [0.0_f32, 0.0, 0.0, 1.0] {
             buf.extend_from_slice(&v.to_le_bytes());
         }
-        // velocity cm/s
-        for v in [50.0_f32, 60.0, 70.0] {
+        // velocity slot — wire carries [up_speed_ms, total_kmh, unused]
+        for v in [3.0_f32, 60.0, 0.0] {
             buf.extend_from_slice(&v.to_le_bytes());
         }
         // gyro deg/s
@@ -386,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn cm_to_meter_conversion_and_axis_remap() {
+    fn position_cm_to_meter_and_axis_remap() {
         let buf = build_packet(0, false);
         let pkt = parse(&buf).unwrap();
         let tel = pkt.into_telemetry();
@@ -395,11 +401,15 @@ mod tests {
         assert!((pos[0] - 1.0).abs() < 1e-6);
         assert!((pos[1] - 3.0).abs() < 1e-6);
         assert!((pos[2] - 2.0).abs() < 1e-6);
-        // velocity (50, 60, 70) cm/s → (0.5, 0.7, 0.6) m/s
-        let vel = tel.velocity.unwrap();
-        assert!((vel[0] - 0.5).abs() < 1e-6);
-        assert!((vel[1] - 0.7).abs() < 1e-6);
-        assert!((vel[2] - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn velocity_left_for_receiver_to_synthesise() {
+        // The wire's velocity slot is unused; the receiver loop
+        // populates `telemetry.velocity` via position differentiation.
+        let buf = build_packet(0, false);
+        let pkt = parse(&buf).unwrap();
+        assert!(pkt.into_telemetry().velocity.is_none());
     }
 
     #[test]

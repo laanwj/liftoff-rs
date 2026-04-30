@@ -82,6 +82,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut parse_errors: u64 = 0;
     let mut file: Option<File> = None;
     let mut missing_logged = false;
+    // Position-differentiation state for synthesising linear velocity.
+    // Uncrashed exposes no usable instantaneous velocity reading from
+    // UE4SS Lua, so we estimate it from frame-to-frame position deltas.
+    // Stored in liftoff-convention metres (matching `telemetry.position`)
+    // so the differentiated vector is in m/s downstream.
+    let mut last_pos_m: Option<[f32; 3]> = None;
+    let mut last_ts_us: Option<u64> = None;
 
     loop {
         interval.tick().await;
@@ -157,7 +164,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         last_seq = Some(pkt.sequence);
 
-        let telemetry = pkt.into_telemetry();
+        let mut telemetry = pkt.into_telemetry();
+
+        // Synthesise velocity from position deltas. First tick (no prior
+        // sample) and timestamp regressions (mod restart resets the
+        // monotonic baseline) leave velocity at None.
+        if let (Some(prev_pos), Some(prev_ts), Some(cur_pos)) =
+            (last_pos_m, last_ts_us, telemetry.position)
+        {
+            if pkt.timestamp_us > prev_ts {
+                let dt_s = (pkt.timestamp_us - prev_ts) as f64 / 1_000_000.0;
+                if dt_s > 1e-4 {
+                    telemetry.velocity = Some([
+                        ((cur_pos[0] - prev_pos[0]) as f64 / dt_s) as f32,
+                        ((cur_pos[1] - prev_pos[1]) as f64 / dt_s) as f32,
+                        ((cur_pos[2] - prev_pos[2]) as f64 / dt_s) as f32,
+                    ]);
+                }
+            }
+        }
+        last_pos_m = telemetry.position;
+        last_ts_us = Some(pkt.timestamp_us);
+
         let battery = pkt.to_battery_packet();
         let mut crsf_frames = crsf_tx::generate_crsf_telemetry(&telemetry, battery.as_ref());
 
@@ -177,15 +205,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         frames_seen += 1;
         if frames_seen <= 3 || frames_seen % 600 == 0 {
-            // dmg shows Uncrashed's raw, *unswizzled* values
-            // (Props_1..N order, 0=healthy → 1=destroyed) so the operator
-            // can read off which slot maps to which physical prop while
-            // calibrating wire::PROP_ORDER.
+            // Everything in this log line is the raw value the Lua mod
+            // received from the game — no unit conversions, no axis
+            // remapping, no swizzles. Useful for confirming what the
+            // game is actually exposing.
+            //
+            // - pos:   UE cm, (X fwd, Y right, Z up)
+            // - vel:   UE cm/s, same axes (zero — see ComponentVelocity note)
+            // - gyro:  FRotator deg/s, (Pitch, Yaw, Roll)
+            // - dmg:   Props_1..N order, 0=healthy → 1=destroyed
             let dmg_str = match pkt.damage.as_ref() {
                 Some(v) => format!("{:?}", v),
                 None => "—".to_string(),
             };
-            // Raw battery fields straight from FS_BatteryState.
             let bat_str = if pkt.has_battery() {
                 format!(
                     "cells={} vpc={:.3}V I={:.2}A used={:.0}/{}mAh",
@@ -199,18 +231,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 "—".to_string()
             };
             info!(
-                "frame #{frames_seen} seq={} flags=0x{:04x} armed={} ground={} crashed={} pos=[{:.2},{:.2},{:.2}] vel=[{:.2},{:.2},{:.2}] inputs=[T={:.2}, Y={:.2}, P={:.2}, R={:.2}] battery={} dmg={} → {} CRSF frames (parse_err={})",
+                "frame #{frames_seen} seq={} flags=0x{:04x} armed={} ground={} crashed={} pos=[{:.1},{:.1},{:.1}] vel=[{:.2},{:.2},{:.2}] gyro=[P={:.2}, Y={:.2}, R={:.2}] inputs=[T={:.2}, Y={:.2}, P={:.2}, R={:.2}] battery={} dmg={} → {} CRSF frames (parse_err={})",
                 pkt.sequence,
                 pkt.flags,
                 pkt.armed(),
                 pkt.on_ground(),
                 pkt.crashed(),
-                telemetry.position.unwrap()[0],
-                telemetry.position.unwrap()[1],
-                telemetry.position.unwrap()[2],
-                telemetry.velocity.unwrap()[0],
-                telemetry.velocity.unwrap()[1],
-                telemetry.velocity.unwrap()[2],
+                pkt.position[0],
+                pkt.position[1],
+                pkt.position[2],
+                pkt.velocity[0],
+                pkt.velocity[1],
+                pkt.velocity[2],
+                pkt.gyro[0],
+                pkt.gyro[1],
+                pkt.gyro[2],
                 pkt.inputs[0],
                 pkt.inputs[1],
                 pkt.inputs[2],
