@@ -1,17 +1,15 @@
 [package]
-name = "liftoff-gpsd"
+name = "crsf-forward"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-chrono = "0.4.42"
 clap = { workspace = true }
 env_logger = { workspace = true }
 liftoff-lib = { workspace = true }
 log = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
 tokio = { workspace = true }
+tokio-serial = "5.4.5"
 metrics = { workspace = true }
 metrics-exporter-tcp = { workspace = true }
 zenoh = { workspace = true }

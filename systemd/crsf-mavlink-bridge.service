@@ -4,7 +4,7 @@ After=network.target zenohd.service
 
 [Service]
 Type=simple
-ExecStart=%h/.cargo/bin/liftoff-mavlink-bridge $LIFTOFF_MAVLINK_BRIDGE_ARGS
+ExecStart=%h/.cargo/bin/crsf-mavlink-bridge $LIFTOFF_MAVLINK_BRIDGE_ARGS
 Environment=RUST_LOG=info
 EnvironmentFile=-%h/.config/liftoff/env
 Restart=on-failure

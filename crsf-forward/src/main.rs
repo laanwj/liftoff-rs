@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "Sent telemetry frame size"
     );
 
-    info!("Starting liftoff-forward");
+    info!("Starting crsf-forward");
     info!("Serial Port: {} @ {}", args.port, args.baud);
 
     let port = tokio_serial::new(&args.port, args.baud).open_native_async()?;

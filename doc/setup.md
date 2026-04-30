@@ -10,7 +10,7 @@ LOCAL                                    CLOUD
                                            | UDP :9001
                                          liftoff-input (bridge + joystick + mux)
                                            | liftoff/telemetry, liftoff/crsf/telemetry
-liftoff-forward  <------- zenohd -------> (all topics)
+crsf-forward  <------- zenohd -------> (all topics)
   | serial                                 | liftoff/crsf/rc
 Radio TX                                 liftoff-input -> uinput -> Sim
 ```
@@ -28,9 +28,9 @@ Radio TX                                 liftoff-input -> uinput -> Sim
 | Binary              | Where    | Role                                              |
 |---------------------|----------|----------------------------------------------------|
 | `liftoff-input`     | Cloud    | Sim UDP bridge + CRSF joystick (uinput) + RC mux  |
-| `liftoff-forward`   | Local    | Serial port (radio TX) <-> Zenoh                  |
-| `liftoff-autopilot` | Local    | Autonomous flight controller                       |
-| `liftoff-gpsd`      | Either   | NMEA GPS server from CRSF telemetry                |
+| `crsf-forward`   | Local    | Serial port (radio TX) <-> Zenoh                  |
+| `autopilot` | Local    | Autonomous flight controller                       |
+| `crsf-gpsd`      | Either   | NMEA GPS server from CRSF telemetry                |
 
 ## Cloud server setup
 
@@ -62,13 +62,13 @@ Local binaries connect to the cloud server's Zenoh router via `--zenoh-connect`.
 
 ```bash
 # Serial bridge (radio TX <-> Zenoh)
-liftoff-forward --port /dev/ttyUSB0 --zenoh-connect udp/<CLOUD_IP>:7447
+crsf-forward --port /dev/ttyUSB0 --zenoh-connect udp/<CLOUD_IP>:7447
 
 # Autopilot (optional)
-liftoff-autopilot --target-alt 10 --zenoh-connect udp/<CLOUD_IP>:7447
+autopilot --target-alt 10 --zenoh-connect udp/<CLOUD_IP>:7447
 
 # GPSD (optional)
-liftoff-gpsd --zenoh-connect udp/<CLOUD_IP>:7447
+crsf-gpsd --zenoh-connect udp/<CLOUD_IP>:7447
 ```
 
 ## Multi-drone
@@ -81,7 +81,7 @@ liftoff-input
 
 # Drone 2
 liftoff-input --sim-bind 127.0.0.1:9002 --zenoh-prefix drone2
-liftoff-autopilot --zenoh-prefix drone2 --zenoh-connect udp/<CLOUD_IP>:7447
+autopilot --zenoh-prefix drone2 --zenoh-connect udp/<CLOUD_IP>:7447
 ```
 
 ## Common CLI flags

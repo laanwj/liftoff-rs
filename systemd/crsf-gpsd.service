@@ -1,10 +1,10 @@
 [Unit]
-Description=Liftoff serial CRSF bridge
+Description=Liftoff simulated GPS server
 After=network.target zenohd.service
 
 [Service]
 Type=simple
-ExecStart=%h/.cargo/bin/liftoff-forward $LIFTOFF_FORWARD_ARGS
+ExecStart=%h/.cargo/bin/crsf-gpsd $LIFTOFF_GPSD_ARGS
 Environment=RUST_LOG=info
 EnvironmentFile=-%h/.config/liftoff/env
 Restart=on-failure

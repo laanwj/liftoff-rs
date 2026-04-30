@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let args = Args::parse();
 
-    info!("Starting liftoff-mavlink-bridge");
+    info!("Starting crsf-mavlink-bridge");
 
     // Zenoh session
     let mut config = Config::default();

@@ -27,10 +27,10 @@ Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with ad
  ━ hardware                         └──────┘       ╚══════╝
 ```
 
-- `liftoff-forward`: CRSF forwarder. Bridges CRSF RC channels and telemetry between an ELRS serial receiver and Zenoh
+- `crsf-forward`: CRSF forwarder. Bridges CRSF RC channels and telemetry between an ELRS serial receiver and Zenoh
 - `liftoff-input`: Simulator bridge + CRSF joystick + mux. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Also bridges the optional [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md) UDP stream into Zenoh topics `damage` and `battery`, and feeds the per-cell voltage and current draw from there into CRSF telemetry. Subscribes to RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, selects which to apply based on radio presence and the SA switch, and simulates a Linux udev joystick
-- `liftoff-autopilot`: PID autopilot with waypoint navigation. Subscribes to CRSF telemetry, publishes RC channels to `crsf/rc/autopilot`
-- `liftoff-gpsd`: gpsd emulator. Subscribes to CRSF telemetry and serves NMEA GPS sentences to clients like QGIS
+- `autopilot`: PID autopilot with waypoint navigation. Subscribes to CRSF telemetry, publishes RC channels to `crsf/rc/autopilot`
+- `crsf-gpsd`: gpsd emulator. Subscribes to CRSF telemetry and serves NMEA GPS sentences to clients like QGIS
 - `telemetry-dashboard`: Real-time TUI telemetry dashboard. Subscribes to CRSF telemetry Zenoh topic and renders scrolling braille line charts (altitude, vario, battery, attitude, speed) with a mini drone damage diagram in the sidebar
 - [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md): BepInEx 5 Unity plugin (C#, not Rust) that exposes per-propeller damage and detailed battery telemetry — neither of which liftoff's own telemetry stream carries. It emits two UDP packet kinds (`LFDM` damage, `LFBT` battery) on a single port that `liftoff-input` consumes
 - `velocidrone-input`: Velocidrone → Zenoh bridge. Connects to Velocidrone's built-in WebSocket telemetry server, repackages each frame as CRSF telemetry on the same Zenoh topic `liftoff-input` publishes to
@@ -111,8 +111,8 @@ Below are the command-line help for all the services. All services are optional.
 All services share the common Zenoh options `--zenoh-connect`, `--zenoh-mode`, and `--zenoh-prefix`. By default they use peer discovery on prefix `liftoff`. To connect to a specific Zenoh router, use `--zenoh-connect tcp/host:7447`.
 
 ```
-$ target/release/liftoff-forward --help
-Usage: liftoff-forward [OPTIONS]
+$ target/release/crsf-forward --help
+Usage: crsf-forward [OPTIONS]
 
 Options:
   -p, --port <PORT>
@@ -161,8 +161,8 @@ Options:
 ```
 
 ```
-$ target/release/liftoff-autopilot --help
-Usage: liftoff-autopilot [OPTIONS]
+$ target/release/autopilot --help
+Usage: autopilot [OPTIONS]
 
 Options:
       --target-alt <TARGET_ALT>
@@ -182,8 +182,8 @@ Options:
 ```
 
 ```
-$ target/release/liftoff-gpsd --help
-Usage: liftoff-gpsd [OPTIONS]
+$ target/release/crsf-gpsd --help
+Usage: crsf-gpsd [OPTIONS]
 
 Options:
       --gpsd-bind <GPSD_BIND>
@@ -227,7 +227,7 @@ Options:
 
 ### RC/Autopilot Mux
 
-When both `liftoff-forward` (manual RC) and `liftoff-autopilot` are running, `liftoff-input` acts as a mux:
+When both `crsf-forward` (manual RC) and `autopilot` are running, `liftoff-input` acts as a mux:
 
 - **No radio connected** (no manual frame within 500ms): autopilot controls
 - **Radio connected, ch8 high**: autopilot controls
@@ -248,7 +248,7 @@ The RC channel values to joystick axis/button mappings are currently hard-coded 
 This project makes use of `env_logger` and uses the standard log verbosity levels and environment variables. For example, to show info level messages and up,
 
 ```
-RUST_LOG=info target/release/liftoff-forward -p /dev/... -b 420000 ...
+RUST_LOG=info target/release/crsf-forward -p /dev/... -b 420000 ...
 ```
 
 To get super-verbose output for troubleshooting, use debug level `debug` or `trace`. The idea is that `debug` summarizes all I/O events, and `trace` shows the raw content of packets.
@@ -258,7 +258,7 @@ To get super-verbose output for troubleshooting, use debug level `debug` or `tra
 The services make use of `metrics-rs` to track internal metrics for observability,
 
 ```
-target/release/liftoff-forward --metrics-tcp --metrics-tcp-bind 127.0.0.1:5000
+target/release/crsf-forward --metrics-tcp --metrics-tcp-bind 127.0.0.1:5000
 ```
 
 These can then be connected to and shown using, for example, [metrics-observer](https://github.com/metrics-rs/metrics/tree/main/metrics-observer).

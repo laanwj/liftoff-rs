@@ -122,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let args = Args::parse();
 
-    info!("Starting liftoff-gpsd on {}", args.gpsd_bind);
+    info!("Starting crsf-gpsd on {}", args.gpsd_bind);
 
     if args.metrics_tcp {
         let builder = TcpBuilder::new().listen_address(args.metrics_tcp_bind);

@@ -193,6 +193,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "autopilot"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "liftoff-lib",
+ "log",
+ "mavlink",
+ "nalgebra",
+ "serde",
+ "serde_json",
+ "tokio",
+ "zenoh",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -559,6 +575,50 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acdd7c62a3665c7f6830a51635d9ac9b23ed385797f70a83bb8bafe9c572ab2b"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "crsf-forward"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "liftoff-lib",
+ "log",
+ "metrics",
+ "metrics-exporter-tcp",
+ "tokio",
+ "tokio-serial",
+ "zenoh",
+]
+
+[[package]]
+name = "crsf-gpsd"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "env_logger",
+ "liftoff-lib",
+ "log",
+ "metrics",
+ "metrics-exporter-tcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "zenoh",
+]
+
+[[package]]
+name = "crsf-mavlink-bridge"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "liftoff-lib",
+ "log",
+ "tokio",
+ "zenoh",
 ]
 
 [[package]]
@@ -1387,54 +1447,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "liftoff-autopilot"
-version = "0.1.0"
-dependencies = [
- "clap",
- "env_logger",
- "liftoff-lib",
- "log",
- "mavlink",
- "nalgebra",
- "serde",
- "serde_json",
- "tokio",
- "zenoh",
-]
-
-[[package]]
-name = "liftoff-forward"
-version = "0.1.0"
-dependencies = [
- "clap",
- "env_logger",
- "liftoff-lib",
- "log",
- "metrics",
- "metrics-exporter-tcp",
- "tokio",
- "tokio-serial",
- "zenoh",
-]
-
-[[package]]
-name = "liftoff-gpsd"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "env_logger",
- "liftoff-lib",
- "log",
- "metrics",
- "metrics-exporter-tcp",
- "serde",
- "serde_json",
- "tokio",
- "zenoh",
-]
-
-[[package]]
 name = "liftoff-input"
 version = "0.1.0"
 dependencies = [
@@ -1460,18 +1472,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "liftoff-mavlink-bridge"
-version = "0.1.0"
-dependencies = [
- "clap",
- "env_logger",
- "liftoff-lib",
- "log",
- "tokio",
- "zenoh",
 ]
 
 [[package]]

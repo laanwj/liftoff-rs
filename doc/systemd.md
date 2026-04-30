@@ -29,8 +29,8 @@ Start/stop individual services:
 
 ```bash
 systemctl --user start liftoff-input
-systemctl --user stop liftoff-autopilot
-systemctl --user status liftoff-gpsd
+systemctl --user stop autopilot
+systemctl --user status crsf-gpsd
 journalctl --user -u liftoff-input -f    # follow logs
 ```
 

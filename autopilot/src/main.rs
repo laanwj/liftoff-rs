@@ -406,7 +406,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     let args = Args::parse();
 
-    info!("Starting liftoff-autopilot");
+    info!("Starting autopilot");
 
     // Load waypoint config if provided
     let waypoint_config: Option<WaypointConfig> = if let Some(ref path) = args.waypoints {

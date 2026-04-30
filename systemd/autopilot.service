@@ -1,10 +1,10 @@
 [Unit]
-Description=Liftoff simulated GPS server
+Description=Liftoff autonomous flight controller
 After=network.target zenohd.service
 
 [Service]
 Type=simple
-ExecStart=%h/.cargo/bin/liftoff-gpsd $LIFTOFF_GPSD_ARGS
+ExecStart=%h/.cargo/bin/autopilot --mavlink $LIFTOFF_AUTOPILOT_ARGS
 Environment=RUST_LOG=info
 EnvironmentFile=-%h/.config/liftoff/env
 Restart=on-failure
