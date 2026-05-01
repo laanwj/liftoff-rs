@@ -1,3 +1,4 @@
+use std::net::{IpAddr, UdpSocket};
 use std::time::Duration;
 
 use clap::Parser;
@@ -30,8 +31,16 @@ struct Args {
     /// the IP Velocidrone discovered via UDP-to-8.8.8.8 — typically the
     /// machine's LAN or public IP, NOT loopback. Use `ss -ltn | grep 60003`
     /// to find the address Velocidrone bound to.
-    #[arg(long, default_value = "ws://127.0.0.1:60003/velocidrone")]
-    ws_url: String,
+    ///
+    /// If unset, the host portion is auto-detected by mirroring
+    /// Velocidrone's own startup probe (UDP connect to 8.8.8.8:65530, read
+    /// back the local endpoint) — yielding the IP of whichever interface
+    /// the OS would route public traffic through. Falls back to
+    /// `127.0.0.1` if probing fails. Pass `--ws-url` explicitly to override
+    /// (e.g. when running velocidrone-input on a different host than the
+    /// game).
+    #[arg(long)]
+    ws_url: Option<String>,
 
     /// Zenoh connect endpoint (e.g. tcp/127.0.0.1:7447). Optional.
     #[arg(long)]
@@ -102,7 +111,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Args::parse();
 
     info!("Starting velocidrone-input");
-    info!("WebSocket: {}", args.ws_url);
+    let ws_url = match args.ws_url.clone() {
+        Some(url) => {
+            info!("WebSocket (from --ws-url): {url}");
+            url
+        }
+        None => {
+            let host = discover_velocidrone_host()
+                .map(|ip| {
+                    info!(
+                        "Auto-detected likely Velocidrone bind IP {ip} via UDP-to-8.8.8.8 \
+                         probe; pass --ws-url to override"
+                    );
+                    ip.to_string()
+                })
+                .unwrap_or_else(|| {
+                    warn!(
+                        "Could not determine outbound interface IP; falling back to \
+                         127.0.0.1. Velocidrone almost certainly is NOT bound there — \
+                         set --ws-url <ws://HOST:60003/velocidrone> explicitly."
+                    );
+                    "127.0.0.1".to_string()
+                });
+            let url = format!("ws://{host}:60003/velocidrone");
+            info!("WebSocket (auto): {url}");
+            url
+        }
+    };
 
     let mut config = Config::default();
     config.insert_json5("mode", &format!(r#""{}""#, args.zenoh_mode))?;
@@ -117,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut backoff_ms = args.reconnect_min_ms;
     loop {
-        match run_once(&args.ws_url, &crsf_tel_publisher).await {
+        match run_once(&ws_url, &crsf_tel_publisher).await {
             Ok(()) => {
                 warn!("WebSocket closed cleanly; will reconnect.");
                 backoff_ms = args.reconnect_min_ms;
@@ -129,6 +164,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
         backoff_ms = (backoff_ms.saturating_mul(2)).min(args.reconnect_max_ms);
     }
+}
+
+/// Mirror Velocidrone's own bind-address discovery so the default `--ws-url`
+/// matches where the game actually listens.
+///
+/// Velocidrone's `UnityWSServer` resolves the bind IP at startup by opening a
+/// UDP socket "to" `8.8.8.8:65530` and reading back its local endpoint — see
+/// `doc/velocidrone-websocket-api.md`. UDP `connect()` does not put any
+/// packets on the wire, but it forces the kernel to commit to a route and
+/// assign a source IP, which is exactly the IP the OS would use for outbound
+/// traffic to a public address. On a typical NAT'd home machine this is the
+/// LAN IP (e.g. `192.168.x.y`); on a host with a public IP directly on the
+/// outbound interface, it's that public IP. Either way, it matches what
+/// Velocidrone bound to. Returns `None` if there's no usable route (no
+/// network at all, or some pathological iptables / namespace setup).
+fn discover_velocidrone_host() -> Option<IpAddr> {
+    let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("8.8.8.8:65530").ok()?;
+    let ip = sock.local_addr().ok()?.ip();
+    // The probe can legally hand back 0.0.0.0 if there's no route; that's
+    // never a valid bind target, so reject it and let the caller fall back.
+    if ip.is_unspecified() {
+        return None;
+    }
+    Some(ip)
 }
 
 async fn run_once(
