@@ -49,11 +49,12 @@ Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with ad
 - [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md): BepInEx 5 Unity plugin (C#, not Rust) that exposes per-propeller damage and detailed battery telemetry — neither of which liftoff's own telemetry stream carries. It emits two UDP packet kinds (`LFDM` damage, `LFBT` battery) on a single port that `liftoff-input` consumes
 - `velocidrone-input`: Velocidrone → Zenoh bridge. Connects to Velocidrone's built-in WebSocket telemetry server, repackages each frame as CRSF telemetry on the same Zenoh topic `liftoff-input` publishes to
 - [`uncrashed-input`](uncrashed-input/README.md) + [`uncrashed-telemetry-mod`](uncrashed-telemetry-mod/README.md): Uncrashed → Zenoh bridge. The mod is a UE4SS Lua plugin that runs inside the game and writes per-tick drone state to a fixed-size IPC file via Wine's drive-Z mapping; the Rust receiver polls the file and republishes CRSF telemetry. Uncrashed exposes no native telemetry interface, so this is the only way to bring it onto Zenoh
-- [`edgetx`](edgetx/README.md): EdgeTX Lua telemetry scripts that decode the per-rotor sim damage CRSF frames and surface them as `Hp1`..`Hp8` sensors on the radio, with both B&W and color LCD variants
 
 This project makes use of `tokio` for reliable, high-performance asynchronous I/O.
 
 ## Hardware
+
+### Receiver
 
 Any kind of ELRS receiver module will do.
 
@@ -75,6 +76,12 @@ The one that was used during development is a Radiomaster RP2 V2 ExpressLRS 2.4g
 ```
 
 Make sure to bind your ELRS radio with the receiver, either through a binding phrase or triple-power-cycle.
+
+### Radio (optional)
+
+<img src="assets/damage-indicator.webp" alt="Damage indicator LUA script" width="25%">
+
+In [`edgetx`](edgetx/README.md) there are EdgeTX Lua telemetry scripts that decode the per-rotor sim damage CRSF frames and surface them as `Hp1`..`Hp8` sensors on the radio, and show them on-screen, with both B&W and color LCD variants
 
 ## Setting up the software
 
