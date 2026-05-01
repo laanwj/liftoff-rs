@@ -23,14 +23,14 @@ Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with ad
  ┌────▼─────────────────────────────────────────────▲───────────────▼───┐
  │                          Zenoh pub/sub                               │
  └──▲─────────────────▼──────────────────▼──────────────────▲───────────┘
-    │ telemetry       │ telemetry        │ telemetry        │ MAVLink
-    │ MAVLink         │                  │                  │
+    │ crsf/telemetry  │ crsf/telemetry   │ crsf/telemetry   │ mavlink
+    │ mavlink         │                  │                  │
  ┌──▼───────┐   ┌─────▼───────┐    ┌─────▼────┐     ┌───────▼────────┐
  │autopilot │   │  telemetry- │    │  crsf-   │     │ mavlink-bridge │
  │          │   │  dashboard  │    │   gpsd   │     │                │
  └────▼─────┘   └─────────────┘    └─────▼────┘     └─────────▲──────┘
       │ crsf/rc/autopilot                │ NMEA               │ MAVLink
-      └─▶ (back into Zenoh)              │                    │
+      └─▶ (back into Zenoh)              │                    │ (UDP)
                                       ╔══▼═══╗            ╔═══▼═══╗
                                       ║ QGIS ║            ║  GCS  ║
                                       ╚══════╝            ╚═══════╝
