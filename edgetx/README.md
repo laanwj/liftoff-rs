@@ -17,10 +17,16 @@ alerts, and are readable from other LUA scripts with `getValue("Hp1")`.
 
 ## Choosing a script
 
-| Script | Display | Radios |
-|--------|---------|--------|
-| `dmgbw.lua` | B&W 128x64 | Radiomaster Pocket, Zorro, Boxer, TX12, Taranis QX7, etc. |
-| `dmgcol.lua` | Color LCD | Radiomaster TX16S, Jumper T-Pro, Horus X10/X12, etc. |
+| Script | Display | Layout | Radios |
+|--------|---------|--------|--------|
+| `dmgbw.lua` | B&W 128x64 | Numbered rotors `1`..`N` with horizontal health bars | Radiomaster Pocket, Zorro, Boxer, TX12, Taranis QX7, etc. |
+| `dmgfig.lua` | B&W 128x64 | Quad X-frame diagram with each rotor's percentage drawn next to it; rotors fill from the bottom and become a bold X at 0% | Same as above, but quadcopter-only |
+| `dmgcol.lua` | Color LCD | Numbered rotors with colour-coded health bars | Radiomaster TX16S, Jumper T-Pro, Horus X10/X12, etc. |
+
+`dmgfig.lua` is purpose-built for 4-rotor X-frame quads — it falls back
+to a "use dmgbw.lua" message if the sim reports any other rotor count.
+You can install both `dmgbw.lua` and `dmgfig.lua` side by side and
+assign each to a different telemetry screen.
 
 The names are deliberately short: EdgeTX requires telemetry-script
 filenames (without the `.lua` extension) to be **6 characters or less**,
@@ -31,11 +37,12 @@ See the [EdgeTX Lua reference](https://luadoc.edgetx.org/overview/script-types/t
 
 1. Connect your radio's SD card (USB mass storage or SD card reader).
 
-2. Copy the appropriate script to the telemetry scripts folder:
+2. Copy the appropriate script(s) to the telemetry scripts folder:
 
    ```
-   # For B&W radios (Pocket, Zorro, etc.)
-   cp dmgbw.lua /path/to/sdcard/SCRIPTS/TELEMETRY/
+   # For B&W radios (Pocket, Zorro, etc.) -- install one or both:
+   cp dmgbw.lua  /path/to/sdcard/SCRIPTS/TELEMETRY/
+   cp dmgfig.lua /path/to/sdcard/SCRIPTS/TELEMETRY/
 
    # For color radios (TX16S, etc.)
    cp dmgcol.lua /path/to/sdcard/SCRIPTS/TELEMETRY/
@@ -46,24 +53,27 @@ See the [EdgeTX Lua reference](https://luadoc.edgetx.org/overview/script-types/t
 
 4. On the radio, go to **Model Setup > Display** (or **Telemetry Screens**
    on some firmware versions), pick an unused screen slot, set its **Type**
-   to `Script`, then select `dmgbw` or `dmgcol` from the picker.
+   to `Script`, then select `dmgbw`, `dmgfig`, or `dmgcol` from the picker.
 
 5. The script runs in the background whenever the model is active, so the
    `Hp1`..`Hp8` sensors are available even when you're not viewing the
    telemetry screen.
 
-After the first run a `dmgbw.luac` (or `dmgcol.luac`) bytecode file will
-appear next to the source on the SD card — that's EdgeTX's compile cache
-and confirms the script was actually loaded.
+After the first run a `.luac` bytecode file will appear next to each
+loaded source on the SD card — that's EdgeTX's compile cache and
+confirms the script was actually loaded.
 
 ## Telemetry sensors
 
+All three scripts register the same `Hp1`..`Hp8` telemetry sensors
+regardless of which one is currently displayed.
+
 | Sensor | Description |
 |--------|-------------|
-| `Hp1` | Rotor 1 health (0.00% - 100.00%) |
-| `Hp2` | Rotor 2 health |
-| `Hp3` | Rotor 3 health |
-| `Hp4` | Rotor 4 health |
+| `Hp1` | Rotor 1 health (0.00% - 100.00%) — **LF** |
+| `Hp2` | Rotor 2 health — **RF** |
+| `Hp3` | Rotor 3 health — **LB** |
+| `Hp4` | Rotor 4 health — **RB** |
 | `Hp5`..`Hp8` | Rotors 5-8 (if present) |
 
 100.00% = fully healthy, 0.00% = destroyed.
