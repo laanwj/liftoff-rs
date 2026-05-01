@@ -19,8 +19,13 @@ alerts, and are readable from other LUA scripts with `getValue("Hp1")`.
 
 | Script | Display | Radios |
 |--------|---------|--------|
-| `damage_bw.lua` | B&W 128x64 | Radiomaster Pocket, Zorro, Boxer, TX12, Taranis QX7, etc. |
-| `damage_color.lua` | Color LCD | Radiomaster TX16S, Jumper T-Pro, Horus X10/X12, etc. |
+| `dmgbw.lua` | B&W 128x64 | Radiomaster Pocket, Zorro, Boxer, TX12, Taranis QX7, etc. |
+| `dmgcol.lua` | Color LCD | Radiomaster TX16S, Jumper T-Pro, Horus X10/X12, etc. |
+
+The names are deliberately short: EdgeTX requires telemetry-script
+filenames (without the `.lua` extension) to be **6 characters or less**,
+otherwise the script is silently filtered out of the screen-type picker.
+See the [EdgeTX Lua reference](https://luadoc.edgetx.org/overview/script-types/telemetry-scripts.md).
 
 ## Installation
 
@@ -30,22 +35,26 @@ alerts, and are readable from other LUA scripts with `getValue("Hp1")`.
 
    ```
    # For B&W radios (Pocket, Zorro, etc.)
-   cp damage_bw.lua /path/to/sdcard/SCRIPTS/TELEMETRY/damage.lua
+   cp dmgbw.lua /path/to/sdcard/SCRIPTS/TELEMETRY/
 
    # For color radios (TX16S, etc.)
-   cp damage_color.lua /path/to/sdcard/SCRIPTS/TELEMETRY/damage.lua
+   cp dmgcol.lua /path/to/sdcard/SCRIPTS/TELEMETRY/
    ```
 
-   The file **must** be named `damage.lua` (or any name you like) in the
-   `SCRIPTS/TELEMETRY/` folder.
+3. Eject the SD card cleanly (or `sync`) and re-insert it into the radio,
+   then power-cycle so EdgeTX rescans `SCRIPTS/TELEMETRY/`.
 
-3. On the radio, go to **Model Setup > Display** (or **Telemetry Screens**
-   on some firmware versions) and assign a screen to the **Script** type,
-   then select `damage`.
+4. On the radio, go to **Model Setup > Display** (or **Telemetry Screens**
+   on some firmware versions), pick an unused screen slot, set its **Type**
+   to `Script`, then select `dmgbw` or `dmgcol` from the picker.
 
-4. The script runs in the background whenever the model is active, so the
+5. The script runs in the background whenever the model is active, so the
    `Hp1`..`Hp8` sensors are available even when you're not viewing the
    telemetry screen.
+
+After the first run a `dmgbw.luac` (or `dmgcol.luac`) bytecode file will
+appear next to the source on the SD card — that's EdgeTX's compile cache
+and confirms the script was actually loaded.
 
 ## Telemetry sensors
 

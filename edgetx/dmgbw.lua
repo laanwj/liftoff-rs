@@ -1,6 +1,6 @@
--- damage_bw.lua -- EdgeTX telemetry script for Liftoff rotor damage
---                  B&W / 128x64 version (Radiomaster Pocket, Zorro,
---                  Boxer, TX12, Taranis QX7, etc.)
+-- dmgbw.lua -- EdgeTX telemetry script for Liftoff rotor damage
+--               B&W / 128x64 version (Radiomaster Pocket, Zorro,
+--               Boxer, TX12, Taranis QX7, etc.)
 --
 -- Decodes custom CRSF frame type 0x42 sent by liftoff-rs and registers
 -- per-rotor health sensors (Hp1..Hp8) that are accessible from EdgeTX
@@ -8,7 +8,8 @@
 -- scripts via getValue("Hp1"), etc.
 --
 -- Install: copy to /SCRIPTS/TELEMETRY/ on the SD card, then assign to
--- a telemetry screen in Model Setup -> Display.
+-- a telemetry screen in Model Setup -> Display. EdgeTX requires the
+-- filename (without .lua) to be 6 characters or less.
 --
 -- Wire format (extended-header broadcast, type 0x42):
 --   [dest:1] [origin:1] [flags:1] [n_rotors:1] [health_1:2] ... [health_n:2]

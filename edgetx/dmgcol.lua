@@ -1,16 +1,17 @@
--- damage_color.lua -- EdgeTX telemetry script for Liftoff rotor damage
---                     Color LCD version (Radiomaster TX16S, Jumper T-Pro,
---                     Horus X10/X12, etc.)
+-- dmgcol.lua -- EdgeTX telemetry script for Liftoff rotor damage
+--                Color LCD version (Radiomaster TX16S, Jumper T-Pro,
+--                Horus X10/X12, etc.)
 --
--- For B&W / 128x64 radios (Pocket, Zorro, Boxer, etc.) use damage_bw.lua.
+-- For B&W / 128x64 radios (Pocket, Zorro, Boxer, etc.) use dmgbw.lua.
 --
 -- Decodes custom CRSF frame type 0x42 sent by liftoff-rs and registers
 -- per-rotor health sensors (Hp1..Hp8) that are accessible from EdgeTX
 -- telemetry screens, logical switches, voice alerts, and other LUA
 -- scripts via getValue("Hp1"), etc.
 --
--- Install: copy (renamed to damage.lua) to /SCRIPTS/TELEMETRY/ on the
--- SD card, then assign to a telemetry screen in Model Setup -> Display.
+-- Install: copy to /SCRIPTS/TELEMETRY/ on the SD card, then assign to
+-- a telemetry screen in Model Setup -> Display. EdgeTX requires the
+-- filename (without .lua) to be 6 characters or less.
 --
 -- Wire format (extended-header broadcast, type 0x42):
 --   [dest:1] [origin:1] [flags:1] [n_rotors:1] [health_1:2] ... [health_n:2]
