@@ -625,18 +625,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crsf-mavlink-bridge"
-version = "0.1.0"
-dependencies = [
- "clap",
- "env_logger",
- "log",
- "telemetry-lib",
- "tokio",
- "zenoh",
-]
-
-[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1579,6 +1567,18 @@ dependencies = [
  "quick-xml",
  "quote",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "mavlink-bridge"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "log",
+ "telemetry-lib",
+ "tokio",
+ "zenoh",
 ]
 
 [[package]]

@@ -7,7 +7,7 @@ members = [
     "crsf-forward",
     "crsf-joystick",
     "autopilot",
-    "crsf-mavlink-bridge",
+    "mavlink-bridge",
     "telemetry-dashboard",
     "velocidrone-input",
     "uncrashed-input",
