@@ -1,0 +1,49 @@
+[gd_resource type="DronePreset" load_steps=2 format=3 uid="uid://gss5inch00000"]
+
+[sub_resource type="ActualRatesPreset" id="rates_5inch"]
+roll = Vector3(150, 800, 0.45)
+pitch = Vector3(150, 800, 0.45)
+yaw = Vector3(120, 600, 0.30)
+throttle_mid = 0.5
+throttle_expo = 0.0
+
+[resource]
+mass_kg = 0.6
+inertia_diag = Vector3(0.0035, 0.005, 0.0035)
+cd_per_axis = Vector3(1.0, 1.3, 1.0)
+area_per_axis = Vector3(0.025, 0.05, 0.012)
+air_density = 1.225
+prop_offset_m0 = Vector3(-0.074, 0, -0.074)
+prop_offset_m1 = Vector3(0.074, 0, -0.074)
+prop_offset_m2 = Vector3(0.074, 0, 0.074)
+prop_offset_m3 = Vector3(-0.074, 0, 0.074)
+prop_axis = Vector3(0, 1, 0)
+prop_handedness_m0 = 1
+prop_handedness_m1 = -1
+prop_handedness_m2 = 1
+prop_handedness_m3 = -1
+motor_kv = 2400.0
+motor_loading_factor = 0.85
+motor_spoolup_tau_s = 0.030
+motor_idle_throttle_floor = 0.05
+thrust_k_t = 0.0052
+thrust_k_q = 0.014
+battery_cells = 4
+battery_internal_r_mohm_per_cell = 8.0
+battery_capacity_mah = 1500.0
+battery_cutoff_v_per_cell = 3.3
+battery_cutoff_band_v = 0.2
+ground_effect_max = 1.4
+ground_effect_distance_m = 0.30
+pid_roll = Vector3(0.0015, 0.008, 0.00005)
+pid_pitch = Vector3(0.0015, 0.008, 0.00005)
+pid_yaw = Vector3(0.0015, 0.012, 0.0)
+rates = SubResource("rates_5inch")
+arm_aux_channel = 5
+arm_threshold_us = 1500
+arm_throttle_max_us = 1100
+fpv_camera_tilt_deg = 30.0
+fpv_camera_fov_deg = 120.0
+fpv_camera_offset = Vector3(0, 0.02, 0.04)
+crash_impulse_threshold_n_s = 8.0
+respawn_cooldown_s = 2.0

@@ -1,0 +1,115 @@
+[gd_scene load_steps=10 format=3 uid="uid://gssworld00000"]
+
+[ext_resource type="Script" path="res://scripts/world.gd" id="1_worldgd"]
+[ext_resource type="Script" path="res://scripts/camera_director.gd" id="2_camdir"]
+
+[sub_resource type="ProceduralSkyMaterial" id="Sky_material"]
+sky_horizon_color = Color(0.65, 0.75, 0.85, 1)
+ground_horizon_color = Color(0.55, 0.55, 0.50, 1)
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("Sky_material")
+
+[sub_resource type="Environment" id="Environment"]
+background_mode = 2
+sky = SubResource("Sky")
+ambient_light_source = 3
+ambient_light_color = Color(0.6, 0.7, 0.85, 1)
+ambient_light_energy = 0.4
+fog_enabled = true
+fog_light_color = Color(0.7, 0.78, 0.88, 1)
+fog_density = 0.0008
+
+[sub_resource type="PlaneMesh" id="GroundMesh"]
+size = Vector2(400, 400)
+subdivide_width = 1
+subdivide_depth = 1
+
+[sub_resource type="StandardMaterial3D" id="GroundMat"]
+albedo_color = Color(0.35, 0.40, 0.30, 1)
+roughness = 0.95
+
+[sub_resource type="BoxShape3D" id="GroundShape"]
+size = Vector3(400, 0.5, 400)
+
+[sub_resource type="CylinderShape3D" id="PylonShape"]
+radius = 0.5
+height = 6.0
+
+[sub_resource type="CylinderMesh" id="PylonMesh"]
+top_radius = 0.5
+bottom_radius = 0.5
+height = 6.0
+
+[sub_resource type="StandardMaterial3D" id="PylonMat"]
+albedo_color = Color(0.7, 0.7, 0.75, 1)
+roughness = 0.8
+
+[node name="World" type="Node3D"]
+script = ExtResource("1_worldgd")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.25, 0.433013, 0, 0.866025, 0.5, -0.5, -0.433013, 0.75, 0, 50, 0)
+light_energy = 1.2
+shadow_enabled = true
+directional_shadow_max_distance = 200.0
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment")
+
+[node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.25, 0)
+
+[node name="GroundShape" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("GroundShape")
+
+[node name="GroundMesh" type="MeshInstance3D" parent="Ground"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.25, 0)
+mesh = SubResource("GroundMesh")
+surface_material_override/0 = SubResource("GroundMat")
+
+[node name="Pylons" type="Node3D" parent="."]
+
+[node name="Pylon1" type="StaticBody3D" parent="Pylons"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 3, -8)
+
+[node name="Shape" type="CollisionShape3D" parent="Pylons/Pylon1"]
+shape = SubResource("PylonShape")
+
+[node name="Mesh" type="MeshInstance3D" parent="Pylons/Pylon1"]
+mesh = SubResource("PylonMesh")
+surface_material_override/0 = SubResource("PylonMat")
+
+[node name="Pylon2" type="StaticBody3D" parent="Pylons"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 3, 5)
+
+[node name="Shape" type="CollisionShape3D" parent="Pylons/Pylon2"]
+shape = SubResource("PylonShape")
+
+[node name="Mesh" type="MeshInstance3D" parent="Pylons/Pylon2"]
+mesh = SubResource("PylonMesh")
+surface_material_override/0 = SubResource("PylonMat")
+
+[node name="Pylon3" type="StaticBody3D" parent="Pylons"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 3, 12)
+
+[node name="Shape" type="CollisionShape3D" parent="Pylons/Pylon3"]
+shape = SubResource("PylonShape")
+
+[node name="Mesh" type="MeshInstance3D" parent="Pylons/Pylon3"]
+mesh = SubResource("PylonMesh")
+surface_material_override/0 = SubResource("PylonMat")
+
+[node name="WakeField" type="WakeFieldNode" parent="."]
+
+[node name="ChaseCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 6, 12)
+current = true
+
+[node name="CameraDirector" type="Control" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2_camdir")

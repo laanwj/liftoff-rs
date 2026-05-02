@@ -1,0 +1,31 @@
+{
+    "comment": "Fleet configuration for godot-swarm-sim. Spawn N drones with per-id Zenoh prefixes.",
+    "prefix_base": "sim",
+    "manual_rc_topic": "sim/crsf/rc",
+    "drones": [
+        {
+            "id": 0,
+            "spawn": [0.0, 1.0, 0.0],
+            "active": true,
+            "preset": "res://presets/racing_5inch.tres"
+        },
+        {
+            "id": 1,
+            "spawn": [3.0, 1.0, 0.0],
+            "active": false,
+            "preset": "res://presets/racing_5inch.tres"
+        },
+        {
+            "id": 2,
+            "spawn": [0.0, 1.0, 3.0],
+            "active": false,
+            "preset": "res://presets/racing_5inch.tres"
+        },
+        {
+            "id": 3,
+            "spawn": [3.0, 1.0, 3.0],
+            "active": false,
+            "preset": "res://presets/racing_5inch.tres"
+        }
+    ]
+}

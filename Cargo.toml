@@ -11,6 +11,7 @@ members = [
     "telemetry-dashboard",
     "velocidrone-input",
     "uncrashed-input",
+    "godot-swarm-sim/rust",
 ]
 
 [workspace.dependencies]

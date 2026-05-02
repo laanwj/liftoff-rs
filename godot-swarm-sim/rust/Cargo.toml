@@ -1,0 +1,32 @@
+[package]
+name = "godot-swarm-sim"
+version = "0.1.0"
+edition = "2024"
+description = "Multi-drone FPV simulator GDExtension"
+license = "MIT"
+publish = false
+
+[lib]
+# rlib so `cargo test` can link against the crate; cdylib for Godot.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+godot = { version = "0.5.2", features = ["api-4-4"] }
+# Pure-Rust building blocks (CRSF wire formats, AETRA decoding,
+# telemetry encoder, topic constants).
+telemetry-lib = { workspace = true }
+# Tokio runtime for the Zenoh thread. Zenoh's API is async-first so
+# the runtime is effectively mandatory; we keep it isolated to its
+# own OS thread and never call back into Godot from it.
+tokio = { workspace = true }
+# Zenoh peer/client for UDP pub/sub.
+zenoh = { workspace = true }
+# Lock-free single-slot "latest value" cells. RC inputs and outbound
+# telemetry both use latest-wins semantics — no point queueing stale
+# frames — so ArcSwap is a much better fit than an SPSC queue.
+arc-swap = "1.7"
+log = { workspace = true }
+
+[dev-dependencies]
+# Convenience for asserting close-enough floating-point values in tests.
+approx = "0.5"

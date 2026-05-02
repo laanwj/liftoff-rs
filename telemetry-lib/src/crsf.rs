@@ -253,6 +253,20 @@ pub struct RcChannelsPacked {
     pub channels: [u16; 16],
 }
 
+#[derive(Debug, Clone)]
+pub struct LinkStatistics {
+    pub snr: u8,
+    pub rf_mode: u8,
+    pub rssi: u8,
+    pub lq: u8,
+    pub tx_power: i8,
+    pub tx_auc: u8,
+    pub rx_auc: u8,
+    pub snr_rx: u8,
+    pub rssi_rx: u8,
+    pub lq_rx: u8,
+}
+
 /// Re-export so the rest of the crate can use `crsf::Damage`.
 pub use crate::crsf_custom::Damage;
 
@@ -268,6 +282,7 @@ pub enum CrsfPacket {
     Rpm(Rpm),
     Voltages(Voltages),
     RcChannelsPacked(RcChannelsPacked),
+    LinkStatistics(LinkStatistics),
     Damage(Damage),
     Unknown(PacketType), // Keep Unknown for parsing existing unknown packets
 }
@@ -422,6 +437,19 @@ pub fn build_packet(address: u8, packet: &CrsfPacket) -> Option<Vec<u8>> {
             frame.push(PacketType::RcChannelsPacked as u8);
             frame.extend_from_slice(&pack_channels(&channels.channels)?);
         }
+        CrsfPacket::LinkStatistics(ls) => {
+            frame.push(PacketType::LinkStatistics as u8);
+            frame.push(ls.snr);
+            frame.push(ls.rf_mode);
+            frame.push(ls.rssi);
+            frame.push(ls.lq);
+            frame.push(ls.tx_power as u8);
+            frame.push(ls.tx_auc);
+            frame.push(ls.rx_auc);
+            frame.push(ls.snr_rx);
+            frame.push(ls.rssi_rx);
+            frame.push(ls.lq_rx);
+        }
         CrsfPacket::Damage(dmg) => {
             frame.push(PacketType::Damage as u8);
             crsf_custom::build_damage_payload(&mut frame, dmg)?;
@@ -563,6 +591,33 @@ pub fn parse_packet(frame: &[u8]) -> Option<CrsfPacket> {
         PacketType::RcChannelsPacked => {
             let channels = unpack_channels(data)?;
             Some(CrsfPacket::RcChannelsPacked(RcChannelsPacked { channels }))
+        }
+        PacketType::LinkStatistics => {
+            if data.len() < 10 {
+                return None;
+            }
+            let snr = data[0];
+            let rf_mode = data[1];
+            let rssi = data[2];
+            let lq = data[3];
+            let tx_power = data[4] as i8;
+            let tx_auc = data[5];
+            let rx_auc = data[6];
+            let snr_rx = data[7];
+            let rssi_rx = data[8];
+            let lq_rx = data[9];
+            Some(CrsfPacket::LinkStatistics(LinkStatistics {
+                snr,
+                rf_mode,
+                rssi,
+                lq,
+                tx_power,
+                tx_auc,
+                rx_auc,
+                snr_rx,
+                rssi_rx,
+                lq_rx,
+            }))
         }
         PacketType::Damage => {
             let dmg = crsf_custom::parse_damage_payload(data)?;
@@ -813,18 +868,44 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_packet_link_statistics() {
+        let payload = [
+            SOURCE_ADDRESS,
+            12,
+            PacketType::LinkStatistics as u8,
+            70, 0, 100, 10, 0, 0, 3, 70, 100, 10,
+            0x00,
+        ];
+        match parse_packet(&payload) {
+            Some(CrsfPacket::LinkStatistics(ls)) => {
+                assert_eq!(ls.snr, 70);
+                assert_eq!(ls.rf_mode, 0);
+                assert_eq!(ls.rssi, 100);
+                assert_eq!(ls.lq, 10);
+                assert_eq!(ls.tx_power, 0);
+                assert_eq!(ls.tx_auc, 0);
+                assert_eq!(ls.rx_auc, 3);
+                assert_eq!(ls.snr_rx, 70);
+                assert_eq!(ls.rssi_rx, 100);
+                assert_eq!(ls.lq_rx, 10);
+            }
+            _ => panic!("Expected LinkStatistics packet"),
+        }
+    }
+
+    #[test]
     fn test_parse_packet_unknown() {
         let payload = [
             SOURCE_ADDRESS,
             5,
-            PacketType::LinkStatistics as u8,
+            PacketType::Heartbeat as u8,
             1,
             2,
             3,
             0x00,
         ];
         match parse_packet(&payload) {
-            Some(CrsfPacket::Unknown(pt)) => assert_eq!(pt, PacketType::LinkStatistics),
+            Some(CrsfPacket::Unknown(pt)) => assert_eq!(pt, PacketType::Heartbeat),
             _ => panic!("Expected Unknown packet"),
         }
     }
@@ -1018,6 +1099,42 @@ mod tests {
         let packet = CrsfPacket::RcChannelsPacked(rc_channels.clone());
         let built = build_packet(SOURCE_ADDRESS, &packet);
         assert_eq!(built, None);
+    }
+
+    #[test]
+    fn test_build_packet_link_statistics() {
+        let ls = LinkStatistics {
+            snr: 70,
+            rf_mode: 0,
+            rssi: 100,
+            lq: 10,
+            tx_power: -5,
+            tx_auc: 0,
+            rx_auc: 3,
+            snr_rx: 70,
+            rssi_rx: 100,
+            lq_rx: 10,
+        };
+        let packet = CrsfPacket::LinkStatistics(ls.clone());
+        let built = build_packet(SOURCE_ADDRESS, &packet).unwrap();
+        assert_eq!(built.len(), 4 + 10);
+        assert_eq!(built[2], PacketType::LinkStatistics as u8);
+
+        let parsed = parse_packet_check(&built).unwrap();
+        if let CrsfPacket::LinkStatistics(p_ls) = parsed {
+            assert_eq!(p_ls.snr, ls.snr);
+            assert_eq!(p_ls.rf_mode, ls.rf_mode);
+            assert_eq!(p_ls.rssi, ls.rssi);
+            assert_eq!(p_ls.lq, ls.lq);
+            assert_eq!(p_ls.tx_power, ls.tx_power);
+            assert_eq!(p_ls.tx_auc, ls.tx_auc);
+            assert_eq!(p_ls.rx_auc, ls.rx_auc);
+            assert_eq!(p_ls.snr_rx, ls.snr_rx);
+            assert_eq!(p_ls.rssi_rx, ls.rssi_rx);
+            assert_eq!(p_ls.lq_rx, ls.lq_rx);
+        } else {
+            panic!("Round trip failed for LinkStatistics");
+        }
     }
 
 }

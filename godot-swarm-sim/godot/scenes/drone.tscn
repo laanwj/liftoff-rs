@@ -1,0 +1,76 @@
+[gd_scene load_steps=7 format=3 uid="uid://gssdrone00000"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(0.16, 0.04, 0.16)
+
+[sub_resource type="BoxMesh" id="BoxMesh_body"]
+size = Vector3(0.16, 0.04, 0.16)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_prop"]
+top_radius = 0.063
+bottom_radius = 0.063
+height = 0.005
+
+[sub_resource type="StandardMaterial3D" id="Material_body"]
+albedo_color = Color(0.15, 0.15, 0.18, 1)
+metallic = 0.4
+roughness = 0.5
+
+[sub_resource type="StandardMaterial3D" id="Material_prop"]
+albedo_color = Color(0.7, 0.2, 0.2, 1)
+roughness = 0.6
+
+[sub_resource type="StandardMaterial3D" id="Material_prop_ccw"]
+albedo_color = Color(0.2, 0.5, 0.9, 1)
+roughness = 0.6
+
+[node name="Drone" type="DroneController"]
+fpv_camera_path = NodePath("FpvCamera")
+mass = 0.6
+inertia = Vector3(0.0035, 0.005, 0.0035)
+linear_damp = 0.0
+angular_damp = 0.05
+
+[node name="ZenohIO" type="ZenohIOInterface" parent="."]
+rc_topic = "sim0/crsf/rc"
+autopilot_topic = "sim0/crsf/rc/autopilot"
+telemetry_topic = "sim0/crsf/telemetry"
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_body")
+
+[node name="BodyMesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_body")
+surface_material_override/0 = SubResource("Material_body")
+
+[node name="PropMarker0" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.074, 0.012, -0.074)
+
+[node name="PropMesh0" type="MeshInstance3D" parent="PropMarker0"]
+mesh = SubResource("CylinderMesh_prop")
+surface_material_override/0 = SubResource("Material_prop")
+
+[node name="PropMarker1" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.074, 0.012, -0.074)
+
+[node name="PropMesh1" type="MeshInstance3D" parent="PropMarker1"]
+mesh = SubResource("CylinderMesh_prop")
+surface_material_override/0 = SubResource("Material_prop_ccw")
+
+[node name="PropMarker2" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.074, 0.012, 0.074)
+
+[node name="PropMesh2" type="MeshInstance3D" parent="PropMarker2"]
+mesh = SubResource("CylinderMesh_prop")
+surface_material_override/0 = SubResource("Material_prop")
+
+[node name="PropMarker3" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.074, 0.012, 0.074)
+
+[node name="PropMesh3" type="MeshInstance3D" parent="PropMarker3"]
+mesh = SubResource("CylinderMesh_prop")
+surface_material_override/0 = SubResource("Material_prop_ccw")
+
+[node name="FpvCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 0.02, 0.04)
+fov = 120.0
