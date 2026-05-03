@@ -1,4 +1,4 @@
-# liftoff-rs
+# drone-swarm-rs
 
 Tools and background services for CRSF joystick, telemetry, and autopilot, to use a quadcopter sim in hardware-in-the-loop simulation. Services communicate over [Zenoh](https://zenoh.io/) pub/sub over UDP.
 
@@ -12,15 +12,15 @@ Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with ad
  ┏━━━▼━━━━━━┓                                 ╚════▲══════════════▼════╝
  ┃ receiver ┃                                      │ uinput       │ telemetry
  ┗━━━▲━━━━━━┛                                      │              │ (UDP / WS / file)
-     │ serial CRSF                            ┌────▲──────┐  ┌────▼─────────┐
-     │                                        │   crsf-   │  │   *-input    │
- ┌───▼─────┐                                  │ joystick  │  │   bridges    │
- │  crsf-  │                                  └─────▲─────┘  └──────▼───────┘
- │ forward │                                        │               │
- └────▲────┘                                        │ crsf/rc       │ crsf/telemetry
-      │ crsf/rc, crsf/telemetry              + crsf/rc/autopilot    │
-      │                                             │               │
- ┌────▼─────────────────────────────────────────────▲───────────────▼───┐
+     │ serial CRSF      ┌──────────────┐      ┌────▲──────┐  ┌────▼─────────┐
+     │                  │    godot-    │      │   crsf-   │  │   *-input    │
+ ┌───▼─────┐            │  swarm-sim   │      │ joystick  │  │   bridges    │
+ │  crsf-  │            └───────▲──────┘      └─────▲─────┘  └──────▼───────┘
+ │ forward │                    │                   │               │
+ └────▲────┘                    │                   │ crsf/rc       │ crsf/telemetry
+      │ crsf/rc, crsf/telemetry │ crsf/rc    + crsf/rc/autopilot    │
+      │                         │ crsf/telemetry    │               │
+ ┌────▼─────────────────────────▼───────────────────▲───────────────▼───┐
  │                          Zenoh pub/sub                               │
  └──▲─────────────────▼──────────────────▼──────────────────▲───────────┘
     │ crsf/telemetry  │ crsf/telemetry   │ crsf/telemetry   │ mavlink
@@ -40,6 +40,7 @@ Primary target is [Liftoff](https://store.steampowered.com/app/410340/), with ad
  ━ hardware
 ```
 
+- [`godot-swarm-sim`](godot-swarm-sim/README.md): Multi-drone FPV simulator built as a Godot 4 GDExtension (Rust via gdext). Subscribes to RC input directly from Zenoh (`crsf/rc`, `crsf/rc/autopilot`) and publishes per-drone CRSF telemetry back — no separate joystick or bridge service needed. Simulates N drones with Jolt physics, inter-drone wake interaction, battery sag, and collision damage
 - `crsf-forward`: CRSF forwarder. Bridges CRSF RC channels and telemetry between an ELRS serial receiver and Zenoh
 - `crsf-joystick`: Virtual joystick service. Subscribes to CRSF RC channels from both manual (`crsf/rc`) and autopilot (`crsf/rc/autopilot`) Zenoh topics, muxes them based on radio presence and the SA switch, and emits a Linux uinput device named `CRSF Joystick` that any sim picks up as a regular controller. Sim-agnostic — the same binary works for Liftoff, Velocidrone, and Uncrashed
 - `liftoff-input`: Liftoff telemetry bridge. Receives liftoff's native UDP telemetry and publishes it to Zenoh. Also bridges the optional [`liftoff-simstate-bridge`](liftoff-simstate-bridge/README.md) UDP stream into Zenoh topics `damage` and `battery`, and feeds the per-cell voltage and current draw from there into CRSF telemetry
