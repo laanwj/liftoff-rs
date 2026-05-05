@@ -120,6 +120,9 @@ pub struct DroneController {
 
     /// Timer for respawn cooldown after destruction.
     respawn_timer: f32,
+
+    /// Previous tick's reset state (for edge detection).
+    prev_reset: bool,
 }
 
 #[godot_api]
@@ -144,6 +147,7 @@ impl IRigidBody3D for DroneController {
             prev_speed: 0.0,
             pending_collisions: Vec::new(),
             respawn_timer: 0.0,
+            prev_reset: false,
         }
     }
 
@@ -384,10 +388,11 @@ impl IRigidBody3D for DroneController {
             }
         }
 
-        // 9. Reset key drives respawn.
-        if rc.reset {
+        // 9. Reset key drives respawn (rising edge only).
+        if rc.reset && !self.prev_reset {
             self.respawn();
         }
+        self.prev_reset = rc.reset;
 
         // 10. Log + autoquit.
         let whole = self.elapsed_s as u64;
