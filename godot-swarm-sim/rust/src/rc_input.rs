@@ -162,8 +162,8 @@ impl ChannelMap {
         channels[2] = ChannelMapping { role: ChannelRole::Throttle, decode: ChannelDecode::AxisUnsigned };
         channels[3] = ChannelMapping { role: ChannelRole::Yaw, decode: ChannelDecode::AxisSigned };
         channels[4] = ChannelMapping { role: ChannelRole::Arm, decode: ChannelDecode::Switch2Pos };
+        channels[5] = ChannelMapping { role: ChannelRole::Reset, decode: ChannelDecode::Switch2Pos };
         channels[6] = ChannelMapping { role: ChannelRole::RcMux, decode: ChannelDecode::Switch2Pos };
-        channels[14] = ChannelMapping { role: ChannelRole::Reset, decode: ChannelDecode::Switch2Pos };
         Self {
             channels,
 

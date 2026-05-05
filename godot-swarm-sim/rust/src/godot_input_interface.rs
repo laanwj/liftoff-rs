@@ -20,7 +20,7 @@ use crate::crsf_io_trait::{CrsfIo, RcFrame, RC_STREAM_DIRECT};
 use crate::input_stub::StickStub;
 
 /// CRSF channel used to encode the reset command.
-const RESET_CHANNEL: usize = 14;
+const RESET_CHANNEL: usize = 5;
 const RESET_ACTIVE: u16 = 1983;
 const RESET_INACTIVE: u16 = 0;
 

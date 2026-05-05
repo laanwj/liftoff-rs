@@ -58,7 +58,6 @@ What's working:
 - **`GodotInputInterface`** (Godot Node) — local keyboard input encoded as
   real CRSF wire bytes. Reads Godot `Input` singleton, produces
   `RcChannelsPacked` frames with the standard AETRA channel layout.
-  Reset is encoded on channel 14.
 - **DroneController** discovers `CrsfIo` children at ready-time, polls
   all of them each tick, feeds frames through the input router, and
   broadcasts rate-limited telemetry (~20 Hz) to all interfaces.

@@ -49,6 +49,7 @@ PACKET_TYPE_RC_CHANNELS_PACKED = 0x16
 AXIS_MAX = 1983
 AXIS_MID = 992
 
+RESET_CHANNEL = 5
 
 def fail(msg: str) -> None:
     print(f"FAIL: {msg}", file=sys.stderr)
@@ -110,7 +111,7 @@ def aetra_climb_frame(throttle_unit: float = 0.7) -> bytes:
     chans[3] = AXIS_MID  # yaw
     chans[4] = AXIS_MAX  # AUX1 high → arm
     chans[6] = 0  # SA switch low → manual override active
-    chans[14] = 0  # reset inactive
+    chans[RESET_CHANNEL] = 0  # reset inactive
     return build_rc_frame(chans)
 
 
@@ -121,7 +122,7 @@ def aetra_pre_arm_frame() -> bytes:
     chans[2] = 0  # throttle low
     chans[4] = AXIS_MAX  # AUX1 high
     chans[6] = 0  # SA low
-    chans[14] = 0  # reset inactive
+    chans[RESET_CHANNEL] = 0  # reset inactive
     return build_rc_frame(chans)
 
 
@@ -131,7 +132,7 @@ def aetra_settle_frame() -> bytes:
     chans[2] = 0
     chans[4] = 0
     chans[6] = 0
-    chans[14] = 0  # reset inactive
+    chans[RESET_CHANNEL] = 0  # reset inactive
     return build_rc_frame(chans)
 
 
