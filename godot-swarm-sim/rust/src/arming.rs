@@ -15,6 +15,8 @@ pub struct ArmingGate {
     /// go low before re-arming is permitted. Prevents immediate
     /// re-arm when the input source still asserts arm=true.
     require_rearm: bool,
+    /// Previous tick's arm switch state for edge detection.
+    prev_arm_switch: bool,
 }
 
 impl ArmingGate {
@@ -22,6 +24,7 @@ impl ArmingGate {
         Self {
             armed: false,
             require_rearm: false,
+            prev_arm_switch: true, // Prevent false rising edge on first call
         }
     }
 
@@ -41,7 +44,7 @@ impl ArmingGate {
     /// - `arm_switch`: decoded arm channel (true = pilot wants armed).
     /// - `throttle`: decoded throttle value in `[0, 1]`.
     ///
-    /// Arms when the switch goes high while throttle is below
+    /// Arms only on the rising edge of the arm switch when throttle is below
     /// `ARM_THROTTLE_THRESHOLD`. Disarms when the switch goes low.
     /// Once armed, throttle can go up without disarming.
     pub fn update(&mut self, arm_switch: bool, throttle: f32) -> bool {
@@ -49,8 +52,12 @@ impl ArmingGate {
             self.armed = false;
             self.require_rearm = false;
         } else if !self.armed && !self.require_rearm && throttle <= ARM_THROTTLE_THRESHOLD {
-            self.armed = true;
+            // Only arm on rising edge of the arm switch.
+            if !self.prev_arm_switch {
+                self.armed = true;
+            }
         }
+        self.prev_arm_switch = arm_switch;
         self.armed
     }
 }
@@ -69,8 +76,23 @@ mod tests {
     }
 
     #[test]
-    fn arms_when_switch_high_throttle_low() {
+    fn arms_only_after_toggle_with_throttle_low() {
         let mut g = gate();
+        // First tick with arm high doesn't arm (no rising edge)
+        assert!(!g.update(true, 0.0));
+        assert!(!g.armed());
+        // Toggle low then high to arm
+        g.update(false, 0.0);
+        assert!(g.update(true, 0.0));
+        assert!(g.armed());
+    }
+
+    #[test]
+    fn arms_on_first_toggle_from_low() {
+        let mut g = gate();
+        // Start with arm low
+        g.update(false, 0.0);
+        // Toggle high to arm
         assert!(g.update(true, 0.0));
         assert!(g.armed());
     }
@@ -85,16 +107,25 @@ mod tests {
     #[test]
     fn switch_low_disarms() {
         let mut g = gate();
-        g.update(true, 0.0); // arm
+        // First call with arm high doesn't arm (no rising edge)
+        g.update(true, 0.0);
+        // Toggle low then high to arm
+        g.update(false, 0.0);
+        g.update(true, 0.0);
         assert!(g.armed());
-        g.update(false, 0.0); // switch low
+        // Switch low disarms
+        g.update(false, 0.0);
         assert!(!g.armed());
     }
 
     #[test]
     fn throttle_up_after_arming_stays_armed() {
         let mut g = gate();
-        g.update(true, 0.0); // arm with throttle low
+        // First call with arm high doesn't arm (no rising edge)
+        g.update(true, 0.0);
+        // Toggle low then high to arm
+        g.update(false, 0.0);
+        g.update(true, 0.0);
         assert!(g.armed());
         let still = g.update(true, 0.5); // throttle goes up
         assert!(still);
@@ -103,6 +134,9 @@ mod tests {
     #[test]
     fn force_disarm() {
         let mut g = gate();
+        // Toggle to arm
+        g.update(true, 0.0);
+        g.update(false, 0.0);
         g.update(true, 0.0);
         assert!(g.armed());
         g.force_disarm();
@@ -118,9 +152,44 @@ mod tests {
     #[test]
     fn repeated_switch_high_while_armed_is_idempotent() {
         let mut g = gate();
+        // Toggle to arm
+        g.update(true, 0.0);
+        g.update(false, 0.0);
         g.update(true, 0.0);
         for _ in 0..10 {
             assert!(g.update(true, 0.5));
         }
+    }
+
+    #[test]
+    fn throttle_low_then_arm_switch_rising_arms() {
+        let mut g = gate();
+        // Start with arm low
+        g.update(false, 0.0);
+        assert!(!g.armed());
+        // Toggle high to arm
+        g.update(true, 0.0);
+        assert!(g.armed());
+    }
+
+    #[test]
+    fn arm_switch_high_then_throttle_low_does_not_arm() {
+        let mut g = gate();
+        g.update(true, 0.5); // arm switch high, throttle high
+        assert!(!g.armed());
+        g.update(true, 0.0); // throttle goes low, but arm switch not rising
+        assert!(!g.armed());
+    }
+
+    #[test]
+    fn starting_with_arm_high_throttle_low_does_not_arm_on_first_tick() {
+        let mut g = gate();
+        // First tick: arm switch already high (no rising edge), throttle is low
+        assert!(!g.update(true, 0.0));
+        assert!(!g.armed());
+        // Now toggle switch low then high to arm
+        g.update(false, 0.0);
+        assert!(g.update(true, 0.0));
+        assert!(g.armed());
     }
 }

@@ -30,6 +30,9 @@ use crate::preset::DronePresetData;
 pub struct TickInput {
     /// Fully-decoded RC input (axes and switches).
     pub rc: RcInput,
+    /// Whether a real RC frame was received this tick. Prevents false
+    /// arming when the RC stream connects mid-flight.
+    pub rc_valid: bool,
     /// Body truth from the rigid body (gyro deg/s, attitude deg).
     pub truth: BodyTruth,
     /// Body-frame velocity, m/s. Computed by the gdext side (rotate
@@ -49,6 +52,7 @@ impl Default for TickInput {
     fn default() -> Self {
         Self {
             rc: RcInput::default(),
+            rc_valid: false,
             truth: BodyTruth::default(),
             v_body: [0.0; 3],
             agl_m: [None; 4],
@@ -221,8 +225,12 @@ impl DroneSim {
         dt: f32,
         mut wake: Option<&mut WakeField>,
     ) -> TickOutput {
-        // 1. Arming
-        let armed = self.arming.update(input.rc.arm, input.rc.throttle);
+        // 1. Arming — only update if we have a real RC frame
+        let armed = if input.rc_valid {
+            self.arming.update(input.rc.arm, input.rc.throttle)
+        } else {
+            self.arming.armed()
+        };
 
         // 2. Rate setpoints from sticks (Acro)
         let sticks = SticksNorm {
@@ -408,10 +416,12 @@ mod tests {
     }
 
     fn arm(sim: &mut DroneSim) {
-        // Arm: aux high, throttle low.
+        // Arm: aux high, throttle low. Need rising edge.
         let mut input = TickInput::default();
+        input.rc_valid = true;
+        sim.step(&input, 1.0 / 240.0); // prime with arm=false
         input.rc.arm = true;
-        sim.step(&input, 1.0 / 240.0);
+        sim.step(&input, 1.0 / 240.0); // rising edge
         assert!(sim.armed());
     }
 

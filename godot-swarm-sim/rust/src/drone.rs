@@ -276,6 +276,7 @@ impl IRigidBody3D for DroneController {
         // 4. Build TickInput.
         let mut input = TickInput::default();
         input.rc = rc;
+        input.rc_valid = source != RcSourceTag::None;
         input.truth = truth;
         input.v_body = [body_lin_vel.x, body_lin_vel.y, body_lin_vel.z];
         input.agl_m = agl;
