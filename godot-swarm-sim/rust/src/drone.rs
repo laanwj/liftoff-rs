@@ -235,7 +235,7 @@ impl IRigidBody3D for DroneController {
         let truth = BodyTruth {
             gyro_dps: [
                 -body_ang_vel.z * RAD_TO_DEG,
-                body_ang_vel.x * RAD_TO_DEG,
+                -body_ang_vel.x * RAD_TO_DEG,
                 -body_ang_vel.y * RAD_TO_DEG,
             ],
             attitude_deg: [0.0; 3],

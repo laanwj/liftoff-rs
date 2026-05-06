@@ -14,24 +14,24 @@
 //! Mixer matrix (columns: roll, pitch, yaw, throttle):
 //!
 //! ```text
-//!     [ +1  +1  −1  +1 ]   [ roll ]
-//!     [ −1  +1  +1  +1 ] · [ pitch ]
-//!     [ −1  −1  −1  +1 ]   [ yaw ]
-//!     [ +1  −1  +1  +1 ]   [ throttle ]
+//!     [ +1  −1  −1  +1 ]   [ roll ]
+//!     [ −1  −1  +1  +1 ] · [ pitch ]
+//!     [ −1  +1  −1  +1 ]   [ yaw ]
+//!     [ +1  +1  +1  +1 ]   [ throttle ]
 //! ```
 //!
-//! Conventions:
+//! Conventions (matching Betaflight):
 //! - positive roll  → drone rolls right (left-side motors thrust more)
-//! - positive pitch → nose pitches up   (front motors thrust more)
+//! - positive pitch → nose pitches down (rear motors thrust more)
 //! - positive yaw   → nose yaws right   (CCW motors thrust more)
 
 /// X-quad mixer matrix rows. Each row is `[roll, pitch, yaw, throttle]`.
 /// Public so tests and tooling can refer to the same definition.
 pub const MIXER_MATRIX: [[f32; 4]; 4] = [
-    [1.0, 1.0, -1.0, 1.0], // M0 front-left,  CW
-    [-1.0, 1.0, 1.0, 1.0], // M1 front-right, CCW
-    [-1.0, -1.0, -1.0, 1.0], // M2 rear-right,  CW
-    [1.0, -1.0, 1.0, 1.0], // M3 rear-left,   CCW
+    [1.0, -1.0, -1.0, 1.0], // M0 front-left,  CW
+    [-1.0, -1.0, 1.0, 1.0], // M1 front-right, CCW
+    [-1.0, 1.0, -1.0, 1.0], // M2 rear-right,  CW
+    [1.0, 1.0, 1.0, 1.0], // M3 rear-left,   CCW
 ];
 
 /// Per-motor command, in `[0, 1]`.
@@ -114,12 +114,12 @@ mod tests {
     }
 
     #[test]
-    fn positive_pitch_front_motors_up_rear_motors_down() {
+    fn positive_pitch_rear_motors_up_front_motors_down() {
         let m = mix(0.0, 0.2, 0.0, 0.5);
-        // m0 (FL, +1 pitch) and m1 (FR, +1 pitch) should rise.
-        // m2 (RR, -1 pitch) and m3 (RL, -1 pitch) should fall.
-        assert!(m[0] > m[2]);
-        assert!(m[1] > m[3]);
+        // m0 (FL, -1 pitch) and m1 (FR, -1 pitch) should fall.
+        // m2 (RR, +1 pitch) and m3 (RL, +1 pitch) should rise.
+        assert!(m[0] < m[2]);
+        assert!(m[1] < m[3]);
     }
 
     #[test]
@@ -132,15 +132,15 @@ mod tests {
 
     #[test]
     fn anti_saturation_preserves_axis_authority() {
-        // Commanded mix that would exceed 1.0 on m0: throttle 1.0 + roll +0.3 + pitch +0.3 → 1.6.
+        // Commanded mix that would exceed 1.0 on m3: throttle 1.0 + roll +0.3 + pitch +0.3 → 1.6.
         let m = mix(0.3, 0.3, 0.0, 1.0);
         // After scaling, max should be exactly 1.0.
         let max_cmd = m.iter().cloned().fold(0.0_f32, f32::max);
         assert_abs_diff_eq!(max_cmd, 1.0, epsilon = 1e-5);
-        // Roll authority survives: m0 still > m1.
-        assert!(m[0] > m[1]);
-        // Pitch authority survives: m0 still > m2.
-        assert!(m[0] > m[2]);
+        // Roll authority survives: m3 still > m1.
+        assert!(m[3] > m[1]);
+        // Pitch authority survives: m3 still > m0.
+        assert!(m[3] > m[0]);
     }
 
     #[test]
