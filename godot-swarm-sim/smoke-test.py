@@ -79,20 +79,42 @@ def step_first_import_if_needed() -> None:
 
 def step_headless_autofly() -> str:
     print(f"==> [3/3] godot --headless autofly=climb ({AUTOQUIT_S} s)")
-    env = os.environ | {
-        "GSS_AUTOQUIT_S": str(AUTOQUIT_S),
-        "GSS_AUTOFLY": "climb",
+    # Generate a test-specific drones.json with active=true for drone 0.
+    import tempfile
+    import json
+    test_config = {
+        "prefix_base": "sim",
+        "drones": [
+            {
+                "id": 0,
+                "spawn": [0.0, 1.0, 0.0],
+                "active": True,
+                "preset": "res://presets/racing_5inch.tres",
+            }
+        ],
     }
-    proc = subprocess.run(
-        ["godot", "--headless", "--path", str(GODOT_PROJECT)],
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=HEADLESS_TIMEOUT_S,
-    )
-    log = proc.stdout + proc.stderr
-    print(log)
-    return log
+    fd, drones_path = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(test_config, f)
+
+        env = os.environ | {
+            "GSS_AUTOQUIT_S": str(AUTOQUIT_S),
+            "GSS_AUTOFLY": "climb",
+            "GSS_DRONES_JSON": drones_path,
+        }
+        proc = subprocess.run(
+            ["godot", "--headless", "--path", str(GODOT_PROJECT)],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=HEADLESS_TIMEOUT_S,
+        )
+        log = proc.stdout + proc.stderr
+        print(log)
+        return log
+    finally:
+        os.unlink(drones_path)
 
 
 def assert_altitude(log: str) -> None:

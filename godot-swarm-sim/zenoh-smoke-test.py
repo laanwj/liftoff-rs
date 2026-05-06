@@ -150,6 +150,31 @@ def main() -> None:
     ).exists():
         fail("staged cdylib missing — run ./build.sh debug first")
 
+    # Generate a test-specific drones.json: single drone, no local IO.
+    import json
+    import tempfile
+    test_config = {
+        "prefix_base": "sim",
+        "drones": [
+            {
+                "id": 0,
+                "spawn": [0.0, 1.0, 0.0],
+                "active": False,
+                "preset": "res://presets/racing_5inch.tres",
+            }
+        ],
+    }
+    fd, drones_path = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(test_config, f)
+
+    try:
+        _run_zenoh_test(drones_path)
+    finally:
+        os.unlink(drones_path)
+
+
+def _run_zenoh_test(drones_path: str) -> None:
     # Open Zenoh session, declare subscriber + publisher.
     session = zenoh.open(zenoh.Config())
     telemetry_count = 0
@@ -169,7 +194,7 @@ def main() -> None:
     # sole input source for this run.
     env = os.environ | {
         "GSS_AUTOQUIT_S": str(AUTOQUIT_S),
-        "GSS_NO_LOCAL_IO": "1",
+        "GSS_DRONES_JSON": drones_path,
     }
     # Strip any GSS_AUTOFLY the surrounding shell may have set.
     env.pop("GSS_AUTOFLY", None)

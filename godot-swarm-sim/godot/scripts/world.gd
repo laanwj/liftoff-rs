@@ -7,7 +7,7 @@ extends Node3D
 ## physics frame so the double-buffer advances after all drones have stepped.
 
 const DRONE_SCENE := preload("res://scenes/drone.tscn")
-const DRONES_JSON_PATH := "res://drones.json"
+const DRONES_JSON_DEFAULT := "res://drones.json"
 
 @onready var wake_field: WakeFieldNode = $WakeField
 
@@ -56,9 +56,8 @@ func _ready() -> void:
 			zenoh_io.set("autopilot_topic", "%s/crsf/rc/autopilot" % prefix)
 			zenoh_io.set("telemetry_topic", "%s/crsf/telemetry" % prefix)
 
-		# Only the active drone gets a GodotInputInterface (keyboard input).
-		# Suppressed by GSS_NO_LOCAL_IO env var for pure-Zenoh tests.
-		if is_active and not OS.has_environment("GSS_NO_LOCAL_IO"):
+# Only the active drone gets a GodotInputInterface (keyboard input).
+		if is_active:
 			var local_io = GodotInputInterface.new()
 			local_io.name = "LocalIO"
 			drone.add_child(local_io)
@@ -92,9 +91,14 @@ func _spawn_default_drone() -> void:
 
 
 func _load_fleet_config() -> Dictionary:
-	if not FileAccess.file_exists(DRONES_JSON_PATH):
+	var path: String
+	if OS.has_environment("GSS_DRONES_JSON"):
+		path = OS.get_environment("GSS_DRONES_JSON")
+	else:
+		path = DRONES_JSON_DEFAULT
+	if not FileAccess.file_exists(path):
 		return {}
-	var f := FileAccess.open(DRONES_JSON_PATH, FileAccess.READ)
+	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		return {}
 	var text := f.get_as_text()
