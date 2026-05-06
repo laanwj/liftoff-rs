@@ -4,11 +4,11 @@ After=network.target zenohd.service
 
 [Service]
 Type=simple
-ExecStart=%h/.cargo/bin/liftoff-input $LIFTOFF_INPUT_ARGS
+ExecStart=%h/.cargo/bin/liftoff-input $DRONESIM_LIFTOFF_INPUT_ARGS
 Environment=RUST_LOG=info
 EnvironmentFile=-%h/.config/liftoff/env
 Restart=on-failure
 RestartSec=3
 
 [Install]
-WantedBy=liftoff.target
+WantedBy=dronesim.target

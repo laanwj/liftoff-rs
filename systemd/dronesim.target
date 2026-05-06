@@ -1,5 +1,5 @@
 [Unit]
-Description=Liftoff services (manual)
+Description=Drone simulation services
 
 [Install]
 WantedBy=default.target

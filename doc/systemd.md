@@ -7,20 +7,7 @@ liftoff-rs ships unit files in `systemd/` for running components as systemd user
 Build and install the binaries, then link the unit files:
 
 ```bash
-for crate in liftoff-{input,forward,autopilot,gpsd,mavlink-bridge}; do
-  cargo install --path "$crate"
-done
-
-# Optional: zenoh router (only needed for remote connections)
-cargo install zenohd
-
-# Install unit files
-mkdir -p ~/.config/systemd/user
-cp systemd/*.{service,target} ~/.config/systemd/user/
-systemctl --user daemon-reload
-
-# Enable services (auto-starts on login, visible in systemctl list-units)
-systemctl --user enable liftoff-{input,forward,autopilot,gpsd,mavlink-bridge}
+./user-install.sh
 ```
 
 ## Usage
@@ -28,17 +15,17 @@ systemctl --user enable liftoff-{input,forward,autopilot,gpsd,mavlink-bridge}
 Start/stop individual services:
 
 ```bash
-systemctl --user start liftoff-input
-systemctl --user stop autopilot
-systemctl --user status crsf-gpsd
-journalctl --user -u liftoff-input -f    # follow logs
+systemctl --user start dronesim-liftoff-input
+systemctl --user stop dronesim-autopilot
+systemctl --user status dronesim-crsf-gpsd
+journalctl --user -u dronesim-liftoff-input -f    # follow logs
 ```
 
 Start/stop all services at once via the target:
 
 ```bash
-systemctl --user start liftoff.target
-systemctl --user stop liftoff.target
+systemctl --user start dronesim.target
+systemctl --user stop dronesim.target
 ```
 
 If you need services to run without an active login session:
@@ -49,17 +36,20 @@ loginctl enable-linger $USER
 
 ## Configuration
 
-All units read an optional environment file at `~/.config/liftoff/env`. Use this to set CLI flags and environment variables without editing the unit files. Each unit expands a `LIFTOFF_*_ARGS` variable, so you can add flags in the env file without touching the units:
+All units read an optional environment file at `~/.config/liftoff/env`. Use this to set CLI flags and environment variables without editing the unit files. Each unit expands a `DRONESIM_*_ARGS` variable, so you can add flags in the env file without touching the units:
 
 ```bash
 mkdir -p ~/.config/liftoff
 cat > ~/.config/liftoff/env << 'EOF'
 RUST_LOG=info
-LIFTOFF_FORWARD_ARGS=--port /dev/ttyACM0 --zenoh-connect udp/10.0.0.5:7447
-LIFTOFF_AUTOPILOT_ARGS=--zenoh-connect udp/10.0.0.5:7447
-LIFTOFF_GPSD_ARGS=--zenoh-connect udp/10.0.0.5:7447
-LIFTOFF_MAVLINK_BRIDGE_ARGS=--zenoh-connect udp/10.0.0.5:7447
+DRONESIM_VELOCIDRONE_INPUT_ARGS=--zenoh-connect udp/10.0.0.5:7447 --ws-url ws://127.0.0.1:9001
+DRONESIM_UNCRASHED_INPUT_ARGS=--zenoh-connect udp/10.0.0.5:7447 --input-file /tmp/uncrashed-telemetry.bin
+DRONESIM_CRSF_FORWARD_ARGS=--zenoh-connect udp/10.0.0.5:7447 -p /dev/ttyACM0
+DRONESIM_CRSF_JOYSTICK_ARGS=--zenoh-connect udp/10.0.0.5:7447
+DRONESIM_AUTOPILOT_ARGS=--zenoh-connect udp/10.0.0.5:7447
+DRONESIM_CRSF_GPSD_ARGS=--zenoh-connect udp/10.0.0.5:7447
+DRONESIM_MAVLINK_BRIDGE_ARGS=--zenoh-connect udp/10.0.0.5:7447
 EOF
 ```
 
-Variable names: `LIFTOFF_INPUT_ARGS`, `LIFTOFF_FORWARD_ARGS`, `LIFTOFF_AUTOPILOT_ARGS`, `LIFTOFF_GPSD_ARGS`, `LIFTOFF_MAVLINK_BRIDGE_ARGS`.
+Variable names: `DRONESIM_LIFTOFF_INPUT_ARGS`, `DRONESIM_VELOCIDRONE_INPUT_ARGS`, `DRONESIM_UNCRASHED_INPUT_ARGS`, `DRONESIM_CRSF_FORWARD_ARGS`, `DRONESIM_CRSF_GPSD_ARGS`, `DRONESIM_CRSF_JOYSTICK_ARGS`, `DRONESIM_AUTOPILOT_ARGS`, `DRONESIM_MAVLINK_BRIDGE_ARGS`.
