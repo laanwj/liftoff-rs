@@ -1,21 +1,23 @@
-; Engine configuration file for godot-swarm-sim
-; Per the design plan in doc/godot-swarm-sim-plan.md:
-;   - Godot 4.4+ (using 4.6.2 for development)
-;   - Jolt as the rigid-body solver (default in 4.4+)
-;   - 240 Hz physics tick
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
+
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
 config/name="godot-swarm-sim"
 config/description="Multi-drone FPV simulator"
 run/main_scene="res://scenes/world.tscn"
-config/features=PackedStringArray("4.4", "Mobile")
-
-[debug]
-
-settings/stdout/print_fps=false
+config/features=PackedStringArray("4.6", "Mobile")
 
 [physics]
 
