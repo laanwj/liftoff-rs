@@ -61,7 +61,7 @@ impl Default for ZenohBusConfig {
             rc_topic: "sim0/crsf/rc".to_string(),
             autopilot_topic: "sim0/crsf/rc/autopilot".to_string(),
             telemetry_topic: "sim0/crsf/telemetry".to_string(),
-            mode: "peer".to_string(),
+            mode: "client".to_string(),
             connect: None,
         }
     }

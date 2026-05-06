@@ -24,7 +24,7 @@ struct Args {
     zenoh_connect: Option<String>,
 
     /// Zenoh mode (peer or client).
-    #[arg(long, default_value = "peer")]
+    #[arg(long, default_value = "client")]
     zenoh_mode: String,
 
     /// Zenoh topic prefix.

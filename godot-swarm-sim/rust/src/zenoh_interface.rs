@@ -49,7 +49,7 @@ impl INode for ZenohIOInterface {
             rc_topic: GString::from("sim0/crsf/rc"),
             autopilot_topic: GString::from("sim0/crsf/rc/autopilot"),
             telemetry_topic: GString::from("sim0/crsf/telemetry"),
-            zenoh_mode: GString::from("peer"),
+            zenoh_mode: GString::from("client"),
             zenoh_connect: GString::new(),
             bus: None,
         }

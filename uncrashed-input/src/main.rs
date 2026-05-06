@@ -45,7 +45,7 @@ struct Args {
     zenoh_connect: Option<String>,
 
     /// Zenoh session mode: `peer` or `client`.
-    #[arg(long, default_value = "peer")]
+    #[arg(long, default_value = "client")]
     zenoh_mode: String,
 
     /// Topic prefix; defaults match the rest of the workspace.

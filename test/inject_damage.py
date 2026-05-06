@@ -161,7 +161,7 @@ def main() -> int:
     )
     p.add_argument(
         "--zenoh-mode",
-        default="peer",
+        default="client",
         choices=["peer", "client"],
         help="Zenoh mode [default: peer]",
     )
