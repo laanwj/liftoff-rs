@@ -32,6 +32,7 @@ func _ready() -> void:
 		var spawn_pos: Array = entry.get("spawn", [0.0, 1.0, 0.0])
 		var is_active: bool = entry.get("active", false)
 		var preset_path: String = entry.get("preset", "")
+		var prefix_override: String = entry.get("prefix_override", "")
 
 		var drone := DRONE_SCENE.instantiate()
 		drone.name = "Drone%d" % drone_id
@@ -44,7 +45,11 @@ func _ready() -> void:
 				drone.set("preset", preset_res)
 
 		# Configure ZenohIOInterface topics for this drone.
-		var prefix := "%s%d" % [prefix_base, drone_id]
+		var prefix: String
+		if prefix_override != "":
+			prefix = prefix_override
+		else:
+			prefix = "%s%d" % [prefix_base, drone_id]
 		var zenoh_io := drone.get_node_or_null("ZenohIO")
 		if zenoh_io:
 			zenoh_io.set("rc_topic", "%s/crsf/rc" % prefix)
