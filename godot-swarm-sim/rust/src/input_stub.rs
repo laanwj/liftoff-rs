@@ -27,7 +27,7 @@ use godot::classes::Input;
 use godot::global::Key;
 use godot::prelude::*;
 
-use crate::rc_input::RcInput;
+use quad_flight_control::rc_input::RcInput;
 
 /// Optional autofly profile for headless smoke tests / CI runs.
 ///

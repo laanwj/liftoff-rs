@@ -16,13 +16,13 @@ use telemetry_lib::crsf::{self, CrsfPacket};
 
 use crate::crsf_io::{self, WorldState};
 use crate::crsf_io_trait::{CrsfIo, RcFrame, RC_STREAM_AUTOPILOT, RC_STREAM_DIRECT};
-use crate::fc::mode::BodyTruth;
+use quad_flight_control::mode::BodyTruth;
 use crate::input_router::{self, RcSample, RouterConfig, RouterInputs};
 use crate::godot_input_interface::GodotInputInterface;
 use crate::pipeline::{DroneSim, TickInput};
 use crate::preset::DronePresetData;
 use crate::preset_resource::DronePreset;
-use crate::rc_input::{self, ChannelMap, RcInput};
+use quad_flight_control::rc_input::{decode_rc, ChannelMap, RcInput};
 use crate::wake_node::WakeFieldNode;
 use crate::zenoh_interface::ZenohIOInterface;
 
@@ -233,12 +233,16 @@ impl IRigidBody3D for DroneController {
 
         // Map Godot body-frame angular velocity into drone-FC convention.
         let truth = BodyTruth {
-            gyro_dps: [
-                -body_ang_vel.z * RAD_TO_DEG,
-                body_ang_vel.x * RAD_TO_DEG,
-                -body_ang_vel.y * RAD_TO_DEG,
+            // Jolt's `angular_velocity` is already rad/s; the FC core
+            // boundary is SI, so no conversion — only the Godot
+            // (+X right, +Y up, −Z fwd) → FC FRD (x fwd, y right, z down)
+            // axis remap.
+            gyro: [
+                -body_ang_vel.z,
+                body_ang_vel.x,
+                -body_ang_vel.y,
             ],
-            attitude_deg: [0.0; 3],
+            attitude: [0.0; 3],
         };
 
         // 3. Collision-damage detection.
@@ -410,7 +414,9 @@ impl IRigidBody3D for DroneController {
                 out.motor_commands[0], out.motor_commands[1], out.motor_commands[2], out.motor_commands[3],
                 out.motor_states[0].rpm, out.motor_states[1].rpm, out.motor_states[2].rpm, out.motor_states[3].rpm,
                 out.pid_output[0], out.pid_output[1], out.pid_output[2],
-                input.truth.gyro_dps[0], input.truth.gyro_dps[1], input.truth.gyro_dps[2]
+                input.truth.gyro[0] * RAD_TO_DEG,
+                input.truth.gyro[1] * RAD_TO_DEG,
+                input.truth.gyro[2] * RAD_TO_DEG
             );
         }
 
@@ -517,7 +523,7 @@ impl DroneController {
         let cfg = RouterConfig::default();
 
         if let Some(out) = input_router::select(&inputs, &cfg, now) {
-            let decoded = rc_input::decode_rc(&out.channels, channel_map);
+            let decoded = decode_rc(&out.channels, channel_map);
             let tag = match out.source {
                 input_router::Selected::Autopilot => RcSourceTag::Autopilot,
                 input_router::Selected::Direct => RcSourceTag::Direct,

@@ -9,8 +9,8 @@
 use godot::prelude::*;
 
 
-use crate::fc::pid::PidGains;
-use crate::fc::rates::{ActualAxis, ThrottleCurve};
+use quad_flight_control::pid::PidGains;
+use quad_flight_control::rates::{ActualAxis, ThrottleCurve};
 use crate::physics::battery::BatteryParams;
 use crate::physics::drag::DragParams;
 use crate::physics::ground::GroundEffectParams;

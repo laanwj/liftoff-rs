@@ -15,6 +15,10 @@ godot = { version = "0.5.2", features = ["api-4-4"] }
 # Pure-Rust building blocks (CRSF wire formats, AETRA decoding,
 # telemetry encoder, topic constants).
 telemetry-lib = { workspace = true }
+# Shared flight-control core — the same crate the quad-fc-firmware-rs
+# firmware links. The sim feeds it simulated sensor input (see
+# `sensor_sim`) and drives its motor output into the rigid body.
+quad-flight-control = { workspace = true }
 # Tokio runtime for the Zenoh thread. Zenoh's API is async-first so
 # the runtime is effectively mandatory; we keep it isolated to its
 # own OS thread and never call back into Godot from it.

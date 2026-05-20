@@ -7,9 +7,9 @@
 //! exercised end-to-end in pure-Rust unit tests.
 
 
-use crate::fc::mode::AcroMode;
-use crate::fc::pid::PidGains;
-use crate::fc::rates::{ActualAxis, ThrottleCurve};
+use quad_flight_control::mode::AcroMode;
+use quad_flight_control::pid::PidGains;
+use quad_flight_control::rates::{ActualAxis, ThrottleCurve};
 use crate::physics::battery::BatteryParams;
 use crate::physics::drag::DragParams;
 use crate::physics::ground::GroundEffectParams;
@@ -146,13 +146,15 @@ pub struct PidPreset {
 
 impl PidPreset {
     /// Conservative starting gains. Sized so that an angular-rate
-    /// error of ~600 deg/s saturates the PID output at ±1.0 (mixer
-    /// command). Real Betaflight tunes are aggressive; we err on
-    /// the gentle side until the rest of the stack is in place.
+    /// error of ~10.5 rad/s (~600 deg/s) saturates the PID output at
+    /// ±1.0 (mixer command). The PID now operates on rad/s errors
+    /// (the FC core is SI internally), so the numbers are the
+    /// previous deg/s-tuned gains multiplied through by RAD_TO_DEG
+    /// ≈ 57.296 — same authority, just expressed in the new units.
     pub const RACING_5INCH: PidPreset = PidPreset {
-        roll: PidGains::new(0.0015, 0.008, 0.00005),
-        pitch: PidGains::new(0.0015, 0.008, 0.00005),
-        yaw: PidGains::new(0.0015, 0.012, 0.0),
+        roll: PidGains::new(0.085_943_67, 0.458_366_24, 0.002_864_789),
+        pitch: PidGains::new(0.085_943_67, 0.458_366_24, 0.002_864_789),
+        yaw: PidGains::new(0.085_943_67, 0.687_549_4, 0.0),
     };
 }
 
