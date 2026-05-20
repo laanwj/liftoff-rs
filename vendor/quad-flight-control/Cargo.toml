@@ -1,0 +1,24 @@
+[workspace]
+
+[package]
+name = "quad-flight-control"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Hardware- and OS-independent quad flight control (rates, rate-PID, mixer, modes). Linked by both the quad-fc-firmware-rs firmware and the godot-swarm-sim SITL."
+
+# `no_std` for real builds; `cargo test` keeps std so the migrated test
+# suite (Vec / format! / approx) is unchanged. Library code never uses
+# std float methods — all transcendentals go through `libm` (see
+# `mathf`) so the firmware build is genuinely `no_std`.
+
+[dependencies]
+libm = "0.2"
+defmt = { version = "1.0", optional = true }
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = []
+defmt = ["dep:defmt"]
