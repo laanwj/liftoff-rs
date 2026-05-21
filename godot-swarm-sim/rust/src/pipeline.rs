@@ -121,6 +121,9 @@ fn controller_config_from_preset(p: &DronePresetData) -> ControllerConfig {
         // 500 ms — the sim's existing RC freshness window. Sim drives
         // RC every tick so the failsafe path is reachable only through
         // explicit stale-link injection in tests.
+        // 5"-racing is props-in. The Aquila16 preset (when it lands)
+        // will use MIXER_MATRIX_PROPS_OUT.
+        mixer_matrix: quad_flight_control::mixer::MIXER_MATRIX_PROPS_IN,
         failsafe_link_timeout_us: 500_000,
     }
 }
