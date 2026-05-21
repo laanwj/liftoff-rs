@@ -7,6 +7,7 @@
 //! exercised end-to-end in pure-Rust unit tests.
 
 
+use quad_flight_control::mixer::{MIXER_MATRIX_PROPS_IN, MIXER_MATRIX_PROPS_OUT};
 use quad_flight_control::mode::AcroMode;
 use quad_flight_control::pid::PidGains;
 use quad_flight_control::rates::{ActualAxis, ThrottleCurve};
@@ -42,6 +43,15 @@ impl BodyParams {
     pub const RACING_5INCH: BodyParams = BodyParams {
         mass_kg: 0.6,
         inertia_diag: [0.0035, 0.005, 0.0035],
+    };
+
+    /// BetaFPV Aquila16 with the 1100 mAh battery. 72.5 g takeoff
+    /// weight; inertia is a point-mass-at-corners estimate with a
+    /// ~1.7× correction for the distributed body/battery mass.
+    /// Refinable from a bifilar-pendulum measurement.
+    pub const AQUILA16: BodyParams = BodyParams {
+        mass_kg: 0.0725,
+        inertia_diag: [1.0e-4, 2.0e-4, 1.0e-4],
     };
 }
 
@@ -90,6 +100,34 @@ pub const RACING_5INCH_PROPS: [PropGeometry; 4] = [
     },
 ];
 
+/// Geometry of the BetaFPV Aquila16 — 86 mm wheelbase, inverted motor
+/// mount (rotor cap down) so the prop disc sits ~10 mm below CG.
+/// Handedness is the props-out / "inverted-quadcopter" pattern: LF+RB
+/// CCW, RF+LB CW — opposite the 5"-racing default. Per-motor offsets
+/// are `±(wheelbase / 2) / √2` ≈ ±30.4 mm in each of X and Z.
+pub const AQUILA16_PROPS: [PropGeometry; 4] = [
+    PropGeometry {
+        offset: [-0.0304, -0.010, -0.0304],
+        axis: [0.0, 1.0, 0.0],
+        handedness: -1, // M0 FL = vendor ch3 (LF), CCW
+    },
+    PropGeometry {
+        offset: [0.0304, -0.010, -0.0304],
+        axis: [0.0, 1.0, 0.0],
+        handedness: 1, // M1 FR = vendor ch1 (RF), CW
+    },
+    PropGeometry {
+        offset: [0.0304, -0.010, 0.0304],
+        axis: [0.0, 1.0, 0.0],
+        handedness: -1, // M2 RR = vendor ch0 (RB), CCW
+    },
+    PropGeometry {
+        offset: [-0.0304, -0.010, 0.0304],
+        axis: [0.0, 1.0, 0.0],
+        handedness: 1, // M3 RL = vendor ch2 (LB), CW
+    },
+];
+
 /// FPV camera placement / lens.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraParams {
@@ -131,6 +169,20 @@ impl RatesPreset {
         },
     };
 
+    /// Conservative starting rates for the Aquila16 (small whoop-class
+    /// indoor craft). Pilot-tuned later via the BetaFPV configurator
+    /// equivalent. `max_rate` values are deg/s by convention; the
+    /// crate's `ActualAxis::evaluate` converts to rad/s.
+    pub const AQUILA16: RatesPreset = RatesPreset {
+        roll: ActualAxis::new(120.0, 600.0, 0.30),
+        pitch: ActualAxis::new(120.0, 600.0, 0.30),
+        yaw: ActualAxis::new(80.0, 400.0, 0.20),
+        throttle: ThrottleCurve {
+            mid: 0.5,
+            expo: 0.0,
+        },
+    };
+
     pub fn into_acro_mode(self) -> AcroMode {
         AcroMode::new(self.roll, self.pitch, self.yaw)
     }
@@ -155,6 +207,16 @@ impl PidPreset {
         roll: PidGains::new(0.085_943_67, 0.458_366_24, 0.002_864_789),
         pitch: PidGains::new(0.085_943_67, 0.458_366_24, 0.002_864_789),
         yaw: PidGains::new(0.085_943_67, 0.687_549_4, 0.0),
+    };
+
+    /// Placeholder PID gains for the Aquila16. Order of magnitude
+    /// scaled from the 5"-racing baseline by the inertia ratio (~35×
+    /// less inertia → ~35× smaller gains for similar control authority),
+    /// then back-converted for rad/s errors. Tune in SITL.
+    pub const AQUILA16: PidPreset = PidPreset {
+        roll: PidGains::new(0.0025, 0.013, 0.000_08),
+        pitch: PidGains::new(0.0025, 0.013, 0.000_08),
+        yaw: PidGains::new(0.0025, 0.020, 0.0),
     };
 }
 
@@ -189,6 +251,11 @@ pub struct DronePresetData {
 
     pub damage: DamageParams,
     pub camera: CameraParams,
+
+    /// X-quad mixer matrix; must match the airframe's prop handedness
+    /// pattern. The same value is forwarded into the FC core's
+    /// `ControllerConfig`, so sim and firmware share one source of truth.
+    pub mixer_matrix: [[f32; 4]; 4],
 }
 
 impl DronePresetData {
@@ -208,6 +275,36 @@ impl DronePresetData {
 
             damage: DamageParams::default(),
             camera: CameraParams::default(),
+
+            mixer_matrix: MIXER_MATRIX_PROPS_IN,
+        }
+    }
+
+    /// BetaFPV Aquila16 — the firmware's actual target airframe.
+    /// Props-out handedness, 72.5 g with battery, 86 mm wheelbase,
+    /// 1102 18000 KV motors on 45 mm 3-blade props. Several constants
+    /// (thrust, inertia, PIDs) are educated estimates; refine in SITL
+    /// and against bench data.
+    pub fn aquila16() -> Self {
+        Self {
+            body: BodyParams::AQUILA16,
+            props: AQUILA16_PROPS,
+            motor: MotorParams::AQUILA16,
+            thrust: ThrustParams::AQUILA16,
+            battery: BatteryParams::AQUILA16_1S_1100,
+            drag: DragParams::AQUILA16,
+            ground_effect: GroundEffectParams::AQUILA16,
+            rates: RatesPreset::AQUILA16,
+            pids: PidPreset::AQUILA16,
+
+            damage: DamageParams::default(),
+            camera: CameraParams {
+                tilt_deg: 20.0,
+                fov_deg: 120.0,
+                offset: [0.0, 0.005, 0.020],
+            },
+
+            mixer_matrix: MIXER_MATRIX_PROPS_OUT,
         }
     }
 }
@@ -274,6 +371,47 @@ mod tests {
         assert!(
             frac < 0.7 && frac > 0.3,
             "hover RPM frac should be 0.3..0.7, got {frac:.3}"
+        );
+    }
+
+    #[test]
+    fn aquila16_assembles() {
+        let p = DronePresetData::aquila16();
+        assert_eq!(p.body.mass_kg, 0.0725);
+        assert_eq!(p.props.len(), 4);
+        let cw = p.props.iter().filter(|q| q.handedness > 0).count();
+        let ccw = p.props.iter().filter(|q| q.handedness < 0).count();
+        assert_eq!(cw, 2);
+        assert_eq!(ccw, 2);
+        // Props-out: FL+RR diagonal is CCW (inverted from props-in).
+        assert_eq!(p.props[0].handedness, -1); // FL CCW
+        assert_eq!(p.props[2].handedness, -1); // RR CCW
+        assert_eq!(p.props[1].handedness, 1); // FR CW
+        assert_eq!(p.props[3].handedness, 1); // RL CW
+        assert_eq!(p.mixer_matrix, MIXER_MATRIX_PROPS_OUT);
+    }
+
+    #[test]
+    fn aquila16_props_below_cg() {
+        // Inverted motor mount → prop disc sits below CG.
+        let p = DronePresetData::aquila16();
+        for prop in p.props.iter() {
+            assert!(prop.offset[1] < 0.0, "prop Y offset should be negative");
+        }
+    }
+
+    #[test]
+    fn aquila16_hover_within_envelope() {
+        // Sanity check on the educated-guess thrust/motor params.
+        let p = DronePresetData::aquila16();
+        let v_pack = (p.battery.cells as f32) * 3.85;
+        let rpm_full = v_pack * p.motor.kv * p.motor.loading_factor;
+        let t_hover = p.body.mass_kg * 9.81 / 4.0;
+        let rpm_hover = 1000.0 * (t_hover / p.thrust.k_t).sqrt();
+        let frac = rpm_hover / rpm_full;
+        assert!(
+            frac < 0.85 && frac > 0.3,
+            "hover RPM frac should be 0.3..0.85, got {frac:.3}"
         );
     }
 }

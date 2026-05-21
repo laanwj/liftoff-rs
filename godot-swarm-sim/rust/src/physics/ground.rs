@@ -19,6 +19,14 @@ impl GroundEffectParams {
         max_multiplier: 1.4,
         fade_distance_m: 0.30, // ~5" prop diameter + a margin
     };
+
+    /// BetaFPV Aquila16: 45 mm-prop ducted whoop. Props sit ~10 mm
+    /// below CG (inverted motor mount), so ground effect kicks in
+    /// earlier and is slightly stronger than a top-mounted micro.
+    pub const AQUILA16: GroundEffectParams = GroundEffectParams {
+        max_multiplier: 1.5,
+        fade_distance_m: 0.05, // ~one 45 mm prop diameter
+    };
 }
 
 /// Evaluate the per-prop ground-effect multiplier.

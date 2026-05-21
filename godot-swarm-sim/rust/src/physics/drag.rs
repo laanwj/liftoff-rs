@@ -34,6 +34,15 @@ impl DragParams {
         area_per_axis: [0.025, 0.05, 0.012],  // [X side, Y top, Z front]
         air_density: 1.225,
     };
+
+    /// BetaFPV Aquila16: ducted 45 mm-prop whoop, ~30 mm tall stack on
+    /// 86 mm wheelbase. Shape similar to a 5"-racing frame but ~5× less
+    /// frontal area on each axis.
+    pub const AQUILA16: DragParams = DragParams {
+        cd_per_axis: [1.0, 1.3, 1.0],
+        area_per_axis: [0.0030, 0.0080, 0.0010], // [X side, Y top, Z front]
+        air_density: 1.225,
+    };
 }
 
 /// Compute body-frame drag force from body-frame relative airspeed.
