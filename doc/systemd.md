@@ -53,3 +53,16 @@ EOF
 ```
 
 Variable names: `DRONESIM_LIFTOFF_INPUT_ARGS`, `DRONESIM_VELOCIDRONE_INPUT_ARGS`, `DRONESIM_UNCRASHED_INPUT_ARGS`, `DRONESIM_CRSF_FORWARD_ARGS`, `DRONESIM_CRSF_GPSD_ARGS`, `DRONESIM_CRSF_JOYSTICK_ARGS`, `DRONESIM_AUTOPILOT_ARGS`, `DRONESIM_MAVLINK_BRIDGE_ARGS`.
+
+## Auto-starting the service when USB receiver is connected
+
+Make a udev configuration file `/etc/udev/rules.d/99-radiomaster-rp2.rules`:
+```
+# auto-start dronesim-crsf-forward.service on connection of RX
+SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="7523", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}="dronesim-crsf-forward.service"
+```
+(adapt vendor and product ID as needed for your specific serial-to-USB dongle)
+
+```sh
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
