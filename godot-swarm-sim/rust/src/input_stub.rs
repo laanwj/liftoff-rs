@@ -10,8 +10,8 @@
 //! |----------------------|----------|---------|
 //! | Roll right           | D        | 1 (A)   |
 //! | Roll left            | A        | 1 (A)   |
-//! | Pitch up (nose up)   | S        | 2 (E)   |
-//! | Pitch down           | W        | 2 (E)   |
+//! | Pitch down (forward) | W        | 2 (E)   |
+//! | Pitch up             | S        | 2 (E)   |
 //! | Throttle up          | Shift    | 3 (T)   |
 //! | Throttle down        | Ctrl     | 3 (T)   |
 //! | Yaw right            | E        | 4 (R)   |
@@ -101,7 +101,7 @@ impl StickStub {
         let input = Input::singleton();
 
         let roll = axis(&input, Key::D, Key::A);
-        let pitch = axis(&input, Key::S, Key::W);
+        let pitch = axis(&input, Key::W, Key::S);
         let yaw = axis(&input, Key::E, Key::Q);
 
         let up = input.is_key_pressed(Key::SHIFT);

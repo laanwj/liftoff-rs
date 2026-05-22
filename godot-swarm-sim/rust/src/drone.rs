@@ -239,7 +239,7 @@ impl IRigidBody3D for DroneController {
             // axis remap.
             gyro: [
                 -body_ang_vel.z,
-                body_ang_vel.x,
+                -body_ang_vel.x,
                 -body_ang_vel.y,
             ],
             attitude: [0.0; 3],
