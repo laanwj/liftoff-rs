@@ -122,6 +122,9 @@ fn controller_config_from_preset(p: &DronePresetData) -> ControllerConfig {
         // RC every tick so the failsafe path is reachable only through
         // explicit stale-link injection in tests.
         mixer_matrix: p.mixer_matrix,
+        // SITL exercises the full mixer/PID range; the bench cap is a
+        // firmware-side safety, not a sim concern.
+        motor_output_limit: 1.0,
         failsafe_link_timeout_us: 500_000,
     }
 }

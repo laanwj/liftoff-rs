@@ -169,14 +169,13 @@ impl RatesPreset {
         },
     };
 
-    /// Conservative starting rates for the Aquila16 (small whoop-class
-    /// indoor craft). Pilot-tuned later via the BetaFPV configurator
+    /// Aquila16 default rates. Pilot-tuned later via configurator
     /// equivalent. `max_rate` values are deg/s by convention; the
     /// crate's `ActualAxis::evaluate` converts to rad/s.
     pub const AQUILA16: RatesPreset = RatesPreset {
-        roll: ActualAxis::new(120.0, 600.0, 0.30),
-        pitch: ActualAxis::new(120.0, 600.0, 0.30),
-        yaw: ActualAxis::new(80.0, 400.0, 0.20),
+        roll: ActualAxis::new(150.0, 533.0, 0.50),
+        pitch: ActualAxis::new(150.0, 533.0, 0.50),
+        yaw: ActualAxis::new(150.0, 533.0, 0.50),
         throttle: ThrottleCurve {
             mid: 0.5,
             expo: 0.0,
