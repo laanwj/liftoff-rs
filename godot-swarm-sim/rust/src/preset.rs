@@ -71,11 +71,11 @@ pub struct PropGeometry {
 /// Layout (Godot left-handed, +X right, +Y up, −Z forward):
 ///
 /// ```text
-/// M0 (FL, CW)   M1 (FR, CCW)
+/// M0 (LF, CW)   M1 (RF, CCW)
 ///       \        /
 ///        center
 ///        /     \
-/// M3 (RL, CCW)  M2 (RR, CW)
+/// M3 (LB, CCW)  M2 (RB, CW)
 /// ```
 pub const RACING_5INCH_PROPS: [PropGeometry; 4] = [
     PropGeometry {
@@ -109,22 +109,22 @@ pub const AQUILA16_PROPS: [PropGeometry; 4] = [
     PropGeometry {
         offset: [-0.0304, -0.010, -0.0304],
         axis: [0.0, 1.0, 0.0],
-        handedness: -1, // M0 FL = vendor ch3 (LF), CCW
+        handedness: -1, // M0 LF = vendor ch3 (LF), CCW
     },
     PropGeometry {
         offset: [0.0304, -0.010, -0.0304],
         axis: [0.0, 1.0, 0.0],
-        handedness: 1, // M1 FR = vendor ch1 (RF), CW
+        handedness: 1, // M1 RF = vendor ch1 (RF), CW
     },
     PropGeometry {
         offset: [0.0304, -0.010, 0.0304],
         axis: [0.0, 1.0, 0.0],
-        handedness: -1, // M2 RR = vendor ch0 (RB), CCW
+        handedness: -1, // M2 RB = vendor ch0 (RB), CCW
     },
     PropGeometry {
         offset: [-0.0304, -0.010, 0.0304],
         axis: [0.0, 1.0, 0.0],
-        handedness: 1, // M3 RL = vendor ch2 (LB), CW
+        handedness: 1, // M3 LB = vendor ch2 (LB), CW
     },
 ];
 
@@ -328,11 +328,11 @@ mod tests {
     #[test]
     fn props_in_x_layout() {
         let p = DronePresetData::racing_5inch();
-        // Front-left and rear-right should be diagonally opposite, both CW.
+        // M0 (LF) and M2 (RB) are the diagonal pair — both CW in props-in.
         assert!(p.props[0].offset[0] < 0.0 && p.props[0].offset[2] < 0.0);
         assert!(p.props[2].offset[0] > 0.0 && p.props[2].offset[2] > 0.0);
         assert_eq!(p.props[0].handedness, p.props[2].handedness);
-        // FR and RL — CCW pair.
+        // M1 (RF) and M3 (LB) — CCW pair.
         assert!(p.props[1].offset[0] > 0.0 && p.props[1].offset[2] < 0.0);
         assert!(p.props[3].offset[0] < 0.0 && p.props[3].offset[2] > 0.0);
         assert_eq!(p.props[1].handedness, p.props[3].handedness);
@@ -382,11 +382,11 @@ mod tests {
         let ccw = p.props.iter().filter(|q| q.handedness < 0).count();
         assert_eq!(cw, 2);
         assert_eq!(ccw, 2);
-        // Props-out: FL+RR diagonal is CCW (inverted from props-in).
-        assert_eq!(p.props[0].handedness, -1); // FL CCW
-        assert_eq!(p.props[2].handedness, -1); // RR CCW
-        assert_eq!(p.props[1].handedness, 1); // FR CW
-        assert_eq!(p.props[3].handedness, 1); // RL CW
+        // Props-out: LF+RB diagonal is CCW (inverted from props-in).
+        assert_eq!(p.props[0].handedness, -1); // LF CCW
+        assert_eq!(p.props[2].handedness, -1); // RB CCW
+        assert_eq!(p.props[1].handedness, 1); // RF CW
+        assert_eq!(p.props[3].handedness, 1); // LB CW
         assert_eq!(p.mixer_matrix, MIXER_MATRIX_PROPS_OUT);
     }
 
