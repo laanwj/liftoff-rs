@@ -398,10 +398,15 @@ mod tests {
     }
 
     fn arm(sim: &mut DroneSim) {
-        // Arm: aux high, throttle low.
-        let mut input = TickInput::default();
-        input.rc.arm = true;
-        sim.step(&input, 1.0 / 240.0);
+        // The arming gate requires an explicit low → high transition
+        // of `rc.arm` (with throttle low) — assuming "switch was already
+        // high at boot" doesn't count as a rising edge. Pre-cycle with
+        // arm=false, then arm=true, throttle low.
+        let low = TickInput::default();
+        sim.step(&low, 1.0 / 240.0);
+        let mut high = TickInput::default();
+        high.rc.arm = true;
+        sim.step(&high, 1.0 / 240.0);
         assert!(sim.armed());
     }
 
