@@ -61,7 +61,8 @@ pub struct RcInput {
     // ── Fixed FC roles ──────────────────────────────────────────
     /// Roll command. −1 = full left, +1 = full right.
     pub roll: f32,
-    /// Pitch command. −1 = full nose-down, +1 = full nose-up.
+    /// Pitch command. −1 = full nose-up, +1 = full nose-down
+    /// (Betaflight convention; stick-forward / "stick up" = nose-down).
     pub pitch: f32,
     /// Throttle command. 0 = idle, 1 = full.
     pub throttle: f32,
@@ -179,8 +180,11 @@ impl Default for ChannelMap {
 
 // ─── Decode function ────────────────────────────────────────────────
 
-/// CRSF 11-bit channel constants.
-const AXIS_MAX: u16 = 1983;
+/// CRSF 11-bit channel constants. Stick travel maps to `[AXIS_MIN,
+/// AXIS_MAX]` (PWM 988..2012 µs); raw values outside the band are
+/// clamped on decode.
+const AXIS_MIN: u16 = 172;
+const AXIS_MAX: u16 = 1811;
 const AXIS_MID: u16 = 992;
 
 /// Decode raw 16-channel CRSF frame into a fully-typed `RcInput`.
@@ -221,9 +225,9 @@ fn decode_value(raw: u16, decode: ChannelDecode) -> DecodedValue {
             if n == 0 {
                 return DecodedValue::Position(0);
             }
-            let clamped = raw.min(AXIS_MAX) as f32;
-            let band =
-                crate::mathf::floor(clamped / (AXIS_MAX as f32 + 1.0) * n as f32) as u8;
+            let clamped = raw.clamp(AXIS_MIN, AXIS_MAX);
+            let normalised = (clamped - AXIS_MIN) as f32 / (AXIS_MAX - AXIS_MIN) as f32;
+            let band = crate::mathf::floor(normalised * n as f32) as u8;
             DecodedValue::Position(band.min(n - 1))
         }
         ChannelDecode::Ignore => DecodedValue::None,
@@ -231,13 +235,14 @@ fn decode_value(raw: u16, decode: ChannelDecode) -> DecodedValue {
 }
 
 fn decode_signed(raw: u16) -> f32 {
-    let c = raw.min(AXIS_MAX) as i32 - AXIS_MID as i32;
+    let c = raw.clamp(AXIS_MIN, AXIS_MAX) as i32 - AXIS_MID as i32;
     let span = (AXIS_MAX as i32 - AXIS_MID as i32).max(1);
     (c as f32 / span as f32).clamp(-1.0, 1.0)
 }
 
 fn decode_unsigned(raw: u16) -> f32 {
-    (raw.min(AXIS_MAX) as f32 / AXIS_MAX as f32).clamp(0.0, 1.0)
+    let c = raw.clamp(AXIS_MIN, AXIS_MAX) - AXIS_MIN;
+    (c as f32 / (AXIS_MAX - AXIS_MIN) as f32).clamp(0.0, 1.0)
 }
 
 // ─── Convenience: build RcInput directly from keyboard (for stubs) ──
