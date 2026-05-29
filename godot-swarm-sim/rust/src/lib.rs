@@ -22,6 +22,7 @@
 pub mod crsf_io;
 pub mod crsf_io_trait;
 pub mod damage;
+pub mod drone;
 pub mod input_router;
 pub mod physics;
 pub mod pipeline;
