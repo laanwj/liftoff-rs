@@ -14,7 +14,7 @@ use crate::rates::ActualAxis;
 pub struct SticksNorm {
     /// Roll stick. +1 = right.
     pub roll: f32,
-    /// Pitch stick. +1 = nose up (stick pulled back).
+    /// Pitch stick. +1 = nose down (stick forward / "stick up" — Betaflight convention).
     pub pitch: f32,
     /// Throttle stick. 0 = idle, 1 = full.
     pub throttle: f32,
