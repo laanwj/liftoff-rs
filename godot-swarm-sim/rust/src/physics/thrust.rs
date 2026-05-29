@@ -28,6 +28,17 @@ impl ThrustParams {
         k_t: 0.0052,
         k_q: 0.014,
     };
+
+    /// BetaFPV Aquila16: 45 mm 3-blade prop on a 1102 18000 KV motor.
+    /// At full throttle (4.2 V × 0.4 loading × 18000 KV ≈ 30 200 RPM
+    /// → 30.2²·k_t per prop), `k_t = 0.0004` puts max thrust per prop
+    /// at ~0.36 N → 1.4 N total → TWR ~2 for a 0.0725 kg craft. Approx
+    /// only; refine from a hover-throttle reading. `k_q` ratio close
+    /// to the racing value.
+    pub const AQUILA16: ThrustParams = ThrustParams {
+        k_t: 0.0004,
+        k_q: 0.014,
+    };
 }
 
 /// Per-prop context passed to a thrust model. Most fields are unused

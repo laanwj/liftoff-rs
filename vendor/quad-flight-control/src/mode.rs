@@ -2,11 +2,11 @@
 //! future modes (Angle, Horizon, AltHold, PosHold) drop-in additions
 //! without touching the FC pipeline below.
 //!
-//! `FlightMode` produces a target angular rate (deg/s) for each of the
+//! `FlightMode` produces a target angular rate (rad/s) for each of the
 //! roll/pitch/yaw axes from the pilot's normalised stick commands plus
 //! whatever truth state the mode needs (attitude, position, velocity).
 
-use crate::fc::rates::ActualAxis;
+use crate::rates::ActualAxis;
 
 /// Normalised pilot stick inputs. All axes in `[-1, +1]` except
 /// throttle which is `[0, 1]`.
@@ -14,7 +14,7 @@ use crate::fc::rates::ActualAxis;
 pub struct SticksNorm {
     /// Roll stick. +1 = right.
     pub roll: f32,
-    /// Pitch stick. +1 = nose up (stick pulled back).
+    /// Pitch stick. +1 = nose down (stick forward / "stick up" — Betaflight convention).
     pub pitch: f32,
     /// Throttle stick. 0 = idle, 1 = full.
     pub throttle: f32,
@@ -23,19 +23,19 @@ pub struct SticksNorm {
 }
 
 /// Truth-state of the body, in body-frame angular rates and world-frame
-/// attitude. Modes that don't need attitude (Acro) can ignore those
-/// fields.
+/// attitude. SI: rad and rad/s. Modes that don't need attitude (Acro)
+/// can ignore those fields.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BodyTruth {
-    /// Body angular rates (deg/s): roll, pitch, yaw.
-    pub gyro_dps: [f32; 3],
-    /// Body attitude as Euler angles (deg) — used by Angle/Horizon
+    /// Body angular rates (rad/s): roll, pitch, yaw.
+    pub gyro: [f32; 3],
+    /// Body attitude as Euler angles (rad) — used by Angle/Horizon
     /// modes when they exist; ignored by Acro.
-    pub attitude_deg: [f32; 3],
+    pub attitude: [f32; 3],
 }
 
 /// FlightMode trait. Returns `[roll, pitch, yaw]` rate setpoints in
-/// deg/s for the inner rate-PID to track.
+/// rad/s for the inner rate-PID to track.
 pub trait FlightMode {
     fn rate_setpoint(&mut self, sticks: &SticksNorm, truth: &BodyTruth, dt: f32) -> [f32; 3];
 }
@@ -97,9 +97,9 @@ mod tests {
             throttle: 1.0,
         };
         let sp = m.rate_setpoint(&sticks, &BodyTruth::default(), 0.01);
-        assert_abs_diff_eq!(sp[0], 800.0, epsilon = 1e-3);
-        assert_abs_diff_eq!(sp[1], 800.0, epsilon = 1e-3);
-        assert_abs_diff_eq!(sp[2], 400.0, epsilon = 1e-3);
+        assert_abs_diff_eq!(sp[0], 800.0 * crate::DEG_TO_RAD, epsilon = 1e-4);
+        assert_abs_diff_eq!(sp[1], 800.0 * crate::DEG_TO_RAD, epsilon = 1e-4);
+        assert_abs_diff_eq!(sp[2], 400.0 * crate::DEG_TO_RAD, epsilon = 1e-4);
     }
 
     #[test]
@@ -123,8 +123,8 @@ mod tests {
         let sticks = SticksNorm::default();
         let truth_a = BodyTruth::default();
         let truth_b = BodyTruth {
-            gyro_dps: [100.0, 200.0, 300.0],
-            attitude_deg: [10.0, 20.0, 30.0],
+            gyro: [1.0, 2.0, 3.0],
+            attitude: [0.1, 0.2, 0.3],
         };
         let sp_a = m.rate_setpoint(&sticks, &truth_a, 0.01);
         let sp_b = m.rate_setpoint(&sticks, &truth_b, 0.01);

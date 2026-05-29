@@ -1138,6 +1138,7 @@ dependencies = [
  "arc-swap",
  "godot",
  "log",
+ "quad-flight-control",
  "telemetry-lib",
  "tokio",
  "zenoh",
@@ -2305,6 +2306,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
 dependencies = [
  "prost",
+]
+
+[[package]]
+name = "quad-flight-control"
+version = "0.1.0"
+dependencies = [
+ "libm",
 ]
 
 [[package]]

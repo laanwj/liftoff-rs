@@ -10,13 +10,13 @@
 //! resulting forces and torques to the `RigidBody3D`. All physics
 //! decisions live here, none in the gdext class.
 
-use crate::arming::ArmingGate;
 use crate::damage::{DamageState, PropCollision};
-use crate::fc::mixer::{self, MotorCommands};
-use crate::fc::mode::{AcroMode, BodyTruth, FlightMode, SticksNorm};
-use crate::fc::pid::PidController;
-use crate::fc::rates::ThrottleCurve;
-use crate::rc_input::RcInput;
+use crate::sensor_sim;
+use quad_flight_control::mixer::MotorCommands;
+use quad_flight_control::mode::BodyTruth;
+use quad_flight_control::{
+    AxisGains, AxisRates, ControlInput, Controller, ControllerConfig, RcInput, RAD_TO_DEG,
+};
 use crate::physics::battery::{BatteryState, SagBattery};
 use crate::physics::drag::quadratic_drag_body;
 use crate::physics::ground::ground_effect;
@@ -95,34 +95,51 @@ pub struct TickOutput {
 /// thrust, and drag for one drone.
 pub struct DroneSim {
     pub preset: DronePresetData,
-    pub mode: AcroMode,
-    pub throttle_curve: ThrottleCurve,
-    pub pid_roll: PidController,
-    pub pid_pitch: PidController,
-    pub pid_yaw: PidController,
+    pub controller: Controller,
     pub motors: [CurveMotor; 4],
     pub battery: SagBattery,
-    pub arming: ArmingGate,
     pub damage: DamageState,
     thrust_model: CurveThrust,
 }
 
+/// Build a `ControllerConfig` from this sim's preset. Holds the
+/// previous per-axis PID clamps (`i_max = 80.0`, `out_max = 1.0`,
+/// `i_decay = 0.999`) — same numbers the prior inline construction
+/// used.
+fn controller_config_from_preset(p: &DronePresetData) -> ControllerConfig {
+    ControllerConfig {
+        rates: AxisRates {
+            roll: p.rates.roll,
+            pitch: p.rates.pitch,
+            yaw: p.rates.yaw,
+        },
+        gains: AxisGains {
+            roll: p.pids.roll,
+            pitch: p.pids.pitch,
+            yaw: p.pids.yaw,
+            i_decay: 0.999,
+            i_max: 80.0,
+            out_max: 1.0,
+        },
+        throttle: p.rates.throttle,
+        // 500 ms — the sim's existing RC freshness window. Sim drives
+        // RC every tick so the failsafe path is reachable only through
+        // explicit stale-link injection in tests.
+        mixer_matrix: p.mixer_matrix,
+        // SITL exercises the full mixer/PID range; the bench cap is a
+        // firmware-side safety, not a sim concern.
+        motor_output_limit: 1.0,
+        // Mirrors the firmware default: motors hold a small idle when
+        // armed so the simulated ESCs see realistic low-throttle
+        // commands (matches the actual hardware behaviour).
+        motor_idle: 0.05,
+        failsafe_link_timeout_us: 500_000,
+    }
+}
+
 impl DroneSim {
     pub fn new(preset: DronePresetData) -> Self {
-        let mode = preset.rates.into_acro_mode();
-        let throttle_curve = preset.rates.throttle;
-        let pid_decay = 0.999;
-        let pid_imax = 80.0;
-        let pid_outmax = 1.0;
-        let pid_roll = PidController::new(preset.pids.roll)
-            .with_decay(pid_decay)
-            .with_clamps(pid_imax, pid_outmax);
-        let pid_pitch = PidController::new(preset.pids.pitch)
-            .with_decay(pid_decay)
-            .with_clamps(pid_imax, pid_outmax);
-        let pid_yaw = PidController::new(preset.pids.yaw)
-            .with_decay(pid_decay)
-            .with_clamps(pid_imax, pid_outmax);
+        let controller = Controller::new(controller_config_from_preset(&preset));
         let motors = [
             CurveMotor::new(preset.motor),
             CurveMotor::new(preset.motor),
@@ -130,7 +147,6 @@ impl DroneSim {
             CurveMotor::new(preset.motor),
         ];
         let battery = SagBattery::new(preset.battery);
-        let arming = ArmingGate::new();
         let damage = DamageState::new(crate::damage::DamageParams {
             impulse_threshold_ns: preset.damage.crash_impulse_threshold_n_s,
             destroyed_prop_count: 3,
@@ -139,25 +155,20 @@ impl DroneSim {
         let thrust_model = CurveThrust::new(preset.thrust);
         Self {
             preset,
-            mode,
-            throttle_curve,
-            pid_roll,
-            pid_pitch,
-            pid_yaw,
+            controller,
             motors,
             battery,
-            arming,
             damage,
             thrust_model,
         }
     }
 
     pub fn armed(&self) -> bool {
-        self.arming.armed()
+        self.controller.armed()
     }
 
     pub fn force_disarm(&mut self) {
-        self.arming.force_disarm();
+        self.controller.force_disarm();
     }
 
     /// Reset transient state (battery, motors, PID integrators, damage).
@@ -167,10 +178,7 @@ impl DroneSim {
         for m in &mut self.motors {
             m.reset();
         }
-        self.pid_roll.reset();
-        self.pid_pitch.reset();
-        self.pid_yaw.reset();
-        self.arming.force_disarm();
+        self.controller.force_disarm();
         self.damage.reset();
     }
 
@@ -181,7 +189,7 @@ impl DroneSim {
     pub fn apply_collisions(&mut self, collisions: &[PropCollision]) -> bool {
         let just_destroyed = self.damage.apply_collisions(collisions);
         if just_destroyed {
-            self.arming.force_disarm();
+            self.controller.force_disarm();
         }
         just_destroyed
     }
@@ -225,45 +233,24 @@ impl DroneSim {
         dt: f32,
         mut wake: Option<&mut WakeField>,
     ) -> TickOutput {
-        // 1. Arming — only update if we have a real RC frame
-        let armed = if input.rc_valid {
-            self.arming.update(input.rc.arm, input.rc.throttle)
-        } else {
-            self.arming.armed()
+        // 1-5. FC core: arming → rates → rate-PID → mixer.
+        //
+        // Sensor-sim layer: `truth.gyro` (rad/s, physics truth) goes
+        // through `sensor_sim::simulate_gyro` so the FC sees a
+        // hardware-shaped reading, not engine truth. Identity in M1;
+        // bias/noise plug in here without touching the FC core.
+        let control_input = ControlInput {
+            gyro: sensor_sim::simulate_gyro(input.truth.gyro),
+            rc: input.rc,
+            // Sim feeds RC every tick; failsafe is exercised by tests
+            // that inject a stale age explicitly.
+            rc_link_age_us: 0,
         };
-
-        // 2. Rate setpoints from sticks (Acro)
-        let sticks = SticksNorm {
-            roll: input.rc.roll,
-            pitch: input.rc.pitch,
-            throttle: input.rc.throttle,
-            yaw: input.rc.yaw,
-        };
-        let rate_setpoint = self.mode.rate_setpoint(&sticks, &input.truth, dt);
-
-        // 3. Inner-loop PIDs (gyro is in deg/s, same units as setpoint)
-        let pid_out = if armed {
-            [
-                self.pid_roll
-                    .step(rate_setpoint[0], input.truth.gyro_dps[0], dt),
-                self.pid_pitch
-                    .step(rate_setpoint[1], input.truth.gyro_dps[1], dt),
-                self.pid_yaw
-                    .step(rate_setpoint[2], input.truth.gyro_dps[2], dt),
-            ]
-        } else {
-            // Disarmed: keep PID state quiet.
-            self.pid_roll.reset();
-            self.pid_pitch.reset();
-            self.pid_yaw.reset();
-            [0.0, 0.0, 0.0]
-        };
-
-        // 4. Throttle stick → throttle command
-        let throttle = self.throttle_curve.evaluate(input.rc.throttle);
-
-        // 5. Mixer
-        let motor_commands = mixer::mix(pid_out[0], pid_out[1], pid_out[2], throttle);
+        let out = self.controller.step(&control_input, dt);
+        let armed = out.armed;
+        let motor_commands = out.motors;
+        let rate_setpoint = out.rate_setpoint;
+        let pid_out = out.pid_output;
 
         // 6. Motors — read current battery state (no current draw yet)
         // for the voltage they see. `peek()` evaluates V_oc and the
@@ -382,7 +369,13 @@ impl DroneSim {
             drag_force_body,
             battery: battery_state,
             motor_states,
-            rate_setpoint_dps: rate_setpoint,
+            // Telemetry/presentation: rad/s → deg/s for the radio,
+            // OSD, and dashboards. Internal math stays rad/s.
+            rate_setpoint_dps: [
+                rate_setpoint[0] * RAD_TO_DEG,
+                rate_setpoint[1] * RAD_TO_DEG,
+                rate_setpoint[2] * RAD_TO_DEG,
+            ],
             pid_output: pid_out,
             prop_damage: self.damage.props,
             destroyed: self.damage.destroyed,
@@ -416,12 +409,15 @@ mod tests {
     }
 
     fn arm(sim: &mut DroneSim) {
-        // Arm: aux high, throttle low. Need rising edge.
-        let mut input = TickInput::default();
-        input.rc_valid = true;
-        sim.step(&input, 1.0 / 240.0); // prime with arm=false
-        input.rc.arm = true;
-        sim.step(&input, 1.0 / 240.0); // rising edge
+        // The arming gate requires an explicit low → high transition
+        // of `rc.arm` (with throttle low) — assuming "switch was already
+        // high at boot" doesn't count as a rising edge. Pre-cycle with
+        // arm=false, then arm=true, throttle low.
+        let low = TickInput::default();
+        sim.step(&low, 1.0 / 240.0);
+        let mut high = TickInput::default();
+        high.rc.arm = true;
+        sim.step(&high, 1.0 / 240.0);
         assert!(sim.armed());
     }
 

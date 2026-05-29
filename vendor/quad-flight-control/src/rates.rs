@@ -1,11 +1,17 @@
 //! Per-axis "Actual" rates evaluation (Betaflight-style) plus the
-//! pilot throttle curve. All inputs in normalised stick deflection,
-//! outputs in deg/s for axes and `[0,1]` for throttle.
+//! pilot throttle curve. Inputs are normalised stick deflection. The
+//! axis tuning numbers (`max_rate`, `center_sensitivity`) are deg/s
+//! because that is the pilot-facing unit, but `evaluate` returns the
+//! commanded rate in **rad/s** — all internal math is SI. Throttle is
+//! dimensionless `[0,1]`.
+
+use crate::mathf;
 
 /// Three-number "Actual" rates spec for one axis: roll, pitch, or yaw.
 ///
 /// - `center_sensitivity` — deg/s of commanded angular rate per unit
-///   stick at low deflection (the slope at stick = 0).
+///   stick at low deflection (the slope at stick = 0). Pilot-facing
+///   unit; `evaluate` converts the result to rad/s.
 /// - `max_rate` — deg/s of commanded angular rate at full stick (±1).
 /// - `expo` — curve shape blending between the two; 0 = linear, larger
 ///   values bend the curve so it stays flat near centre and sharpens
@@ -30,11 +36,12 @@ impl ActualAxis {
     }
 
     /// Evaluate this axis at a given stick deflection in `[-1, +1]`.
-    /// Returns the commanded angular rate in deg/s.
+    /// Returns the commanded angular rate in **rad/s** (the deg/s
+    /// tuning numbers are converted on the way out).
     pub fn evaluate(&self, stick: f32) -> f32 {
         let s = stick.clamp(-1.0, 1.0);
-        let abs = s.abs();
-        let expo = self.expo.max(0.0);
+        let abs = mathf::abs(s);
+        let expo = mathf::max(self.expo, 0.0);
 
         // Linear contribution dominates near centre, scales with
         // center_sensitivity. The (1 + 8·expo) exponent matches the
@@ -42,12 +49,14 @@ impl ActualAxis {
         // is just `max_rate · |s|` (linear), while higher expo shifts
         // it towards `|s|^9` style sharpness.
         let lin = abs * self.center_sensitivity;
-        let cur = self.max_rate * abs.powf(1.0 + 8.0 * expo);
+        let cur = self.max_rate * mathf::powf(abs, 1.0 + 8.0 * expo);
 
         // Blend: at low |s| the linear term dominates; near full stick
         // the curve term dominates.
         let blended = lin * (1.0 - abs) + cur * abs;
-        s.signum() * blended
+        // Tuning numbers are deg/s (pilot-facing); the control path is
+        // SI, so hand back rad/s.
+        mathf::signum(s) * blended * crate::DEG_TO_RAD
     }
 }
 
@@ -98,8 +107,8 @@ impl ThrottleCurve {
         //   expo < 0 → p < 1 → bend(t) lifts off zero quickly (sharpens).
         // k=2 chosen so expo=±0.5 gives a noticeable but not extreme
         // bend and the formula matches Betaflight's qualitative feel.
-        let p = (2.0 * expo).exp();
-        let bent = t.signum() * t.abs().powf(p);
+        let p = mathf::exp(2.0 * expo);
+        let bent = mathf::signum(t) * mathf::powf(mathf::abs(t), p);
 
         // Map signed bent value into [0, 1] around 0.5.
         (0.5 + 0.5 * bent).clamp(0.0, 1.0)
@@ -124,13 +133,13 @@ mod tests {
     fn actual_full_positive_stick_hits_max_rate() {
         // At stick = +1, abs = 1, lin = center, cur = max, blend = 1.0 → cur.
         let a = ax(100.0, 800.0, 0.0);
-        assert_abs_diff_eq!(a.evaluate(1.0), 800.0, epsilon = 1e-3);
+        assert_abs_diff_eq!(a.evaluate(1.0), 800.0 * crate::DEG_TO_RAD, epsilon = 1e-4);
     }
 
     #[test]
     fn actual_full_negative_stick_hits_minus_max() {
         let a = ax(100.0, 800.0, 0.5);
-        assert_abs_diff_eq!(a.evaluate(-1.0), -800.0, epsilon = 1e-3);
+        assert_abs_diff_eq!(a.evaluate(-1.0), -800.0 * crate::DEG_TO_RAD, epsilon = 1e-4);
     }
 
     #[test]
@@ -143,8 +152,12 @@ mod tests {
     #[test]
     fn actual_zero_expo_is_pure_linear_blend() {
         let a = ax(100.0, 800.0, 0.0);
-        // At stick = 0.5: lin = 50, cur = 400, blend = 0.5*lin + 0.5*cur = 225.
-        assert_abs_diff_eq!(a.evaluate(0.5), 0.5 * 50.0 + 0.5 * 400.0, epsilon = 1e-3);
+        // At stick = 0.5: lin = 50, cur = 400, blend = 0.5*lin + 0.5*cur = 225 (deg/s) → rad/s.
+        assert_abs_diff_eq!(
+            a.evaluate(0.5),
+            (0.5 * 50.0 + 0.5 * 400.0) * crate::DEG_TO_RAD,
+            epsilon = 1e-4
+        );
     }
 
     #[test]

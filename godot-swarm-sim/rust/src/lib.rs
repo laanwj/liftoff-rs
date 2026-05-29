@@ -4,8 +4,12 @@
 //! gdext layer that wires them into a `RigidBody3D`-based drone.
 //!
 //! Module map:
-//! - `arming`, `preset` — gate logic and the all-in-one preset struct.
-//! - `fc::*` — flight controller (rates, mode, PID, mixer).
+//! - `preset` — the all-in-one preset struct.
+//! - The flight controller itself (rates / mode / PID / mixer / arming /
+//!   RC decode) lives in the shared `quad-flight-control` crate, used
+//!   directly by `pipeline` and friends.
+//! - `sensor_sim` — turns rigid-body truth into simulated sensor
+//!   readings (M1: gyro). The FC core sees only this, never truth.
 //! - `physics::*` — submodels (motor, battery, thrust, drag, ground).
 //! - `pipeline` — per-tick orchestrator tying it all together.
 //! - `drone` — gdext class extending `RigidBody3D`.
@@ -15,18 +19,15 @@
 //! - `input_stub` — keyboard polling logic (used by `io_interface`).
 //! - `preset_resource` — gdext `Resource` subclasses for `.tres` presets.
 
-pub mod arming;
 pub mod crsf_io;
 pub mod crsf_io_trait;
 pub mod damage;
-pub mod fc;
 pub mod input_router;
 pub mod physics;
 pub mod pipeline;
 pub mod preset;
-pub mod rc_input;
+pub mod sensor_sim;
 
-mod drone;
 mod input_stub;
 mod godot_input_interface;
 mod preset_resource;

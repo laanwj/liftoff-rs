@@ -36,6 +36,17 @@ impl MotorParams {
         spoolup_tau_s: 0.030,
         idle_throttle_floor: 0.05,
     };
+
+    /// BetaFPV Aquila16: 1102 18000 KV motor on a 45 mm 3-blade prop,
+    /// 1S. Small high-KV motors loaded by high-pitch ducted props →
+    /// loading factor ~0.4; spool-up faster than a 5" rotor (~20 ms).
+    /// Idle floor matches the 5"-racing default.
+    pub const AQUILA16: MotorParams = MotorParams {
+        kv: 18000.0,
+        loading_factor: 0.4,
+        spoolup_tau_s: 0.020,
+        idle_throttle_floor: 0.05,
+    };
 }
 
 #[derive(Debug, Clone, Copy)]

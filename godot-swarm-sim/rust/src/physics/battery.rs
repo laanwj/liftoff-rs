@@ -29,6 +29,16 @@ impl BatteryParams {
         cutoff_v_per_cell: 3.3,
         cutoff_band_v: 0.2,
     };
+
+    /// BetaFPV Aquila16 stock 1S 1100 mAh BT2.0 pack. Internal R for a
+    /// small 1S LiPo at this size is around 15–20 mΩ.
+    pub const AQUILA16_1S_1100: BatteryParams = BatteryParams {
+        cells: 1,
+        internal_r_mohm_per_cell: 18.0,
+        capacity_mah: 1100.0,
+        cutoff_v_per_cell: 3.3,
+        cutoff_band_v: 0.2,
+    };
 }
 
 #[derive(Debug, Clone, Copy)]

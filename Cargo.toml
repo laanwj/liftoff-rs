@@ -13,11 +13,15 @@ members = [
     "uncrashed-input",
     "godot-swarm-sim/rust",
 ]
+# Vendored as a git subtree; its Cargo.toml declares its own [workspace],
+# so it must not be absorbed into this workspace.
+exclude = ["vendor/quad-flight-control"]
 
 [workspace.dependencies]
 clap = { version = "4.5.54", features = ["derive"] }
 env_logger = "0.11.8"
 telemetry-lib = { path = "telemetry-lib" }
+quad-flight-control = { path = "vendor/quad-flight-control" }
 log = "0.4.29"
 tokio = { version = "1.49.0", features = ["full"] }
 metrics = "0.24.3"

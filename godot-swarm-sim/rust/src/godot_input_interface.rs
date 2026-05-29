@@ -15,6 +15,7 @@ use godot::classes::{INode, Node};
 use godot::prelude::*;
 
 use telemetry_lib::crsf::{self, CrsfPacket, RcChannelsPacked, device_address};
+use quad_flight_control::rc_input;
 
 use crate::crsf_io_trait::{CrsfIo, RcFrame, RC_STREAM_DIRECT};
 use crate::input_stub::StickStub;
@@ -122,7 +123,7 @@ impl GodotInputInterface {
 }
 
 /// Convert decoded stick values back to raw CRSF 11-bit channels.
-fn rc_input_to_channels(rc: &crate::rc_input::RcInput, reset: bool) -> [u16; 16] {
+fn rc_input_to_channels(rc: &rc_input::RcInput, reset: bool) -> [u16; 16] {
     let mut ch = [AXIS_MID; 16];
 
     // AETRA layout: ch0=roll, ch1=pitch, ch2=throttle, ch3=yaw, ch4=arm

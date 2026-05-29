@@ -1,9 +1,11 @@
 //! Single-axis rate PID with anti-windup decay.
 //!
-//! The controller takes a target rate (deg/s) and a measured rate
-//! (deg/s) and produces a normalised mixer command in `[-1, +1]`. The
+//! The controller takes a target rate (rad/s) and a measured rate
+//! (rad/s) and produces a normalised mixer command in `[-1, +1]`. The
 //! integrator is leak-decayed each tick rather than hard-clamped to
 //! avoid the discontinuities that pure clamping introduces.
+
+use crate::mathf;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PidGains {
@@ -88,7 +90,7 @@ impl PidController {
         // because last_error is zero by default and would produce a
         // spurious large derivative if the setpoint starts non-zero.
         let derivative = if self.primed {
-            (error - self.last_error) / dt.max(1e-9)
+            (error - self.last_error) / mathf::max(dt, 1e-9)
         } else {
             0.0
         };
